@@ -1,0 +1,1180 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ortho Dictate</title>
+<style>html,body{margin:0;height:100%;background:#e9f0f3;font-family:Segoe UI,Arial,sans-serif}
+#wrap{max-width:760px;margin:0 auto;height:100vh;padding:16px;box-sizing:border-box}#app{height:100%}</style></head>
+<body><div id="wrap"><div id="app"></div></div>
+<script>
+/* OrthoDictate core — templates, ortho term normalizer, speech + panel UI */
+(function (global) {
+  'use strict';
+
+  /* ------------------------------------------------------------------ */
+  /* TEMPLATES                                                            */
+  /* key: internal id, label: printed label, sep: text after label,      */
+  /* aliases: spoken names that jump to this field, def: default text,   */
+  /* optional: only printed when filled                                   */
+  /* ------------------------------------------------------------------ */
+  const VERSION = '1.9';
+  const ARCH_GUARD = true; // marks aliases that must not fire when followed by right/left/and
+  const NV = { key: 'nv', label: 'Next Visit', short: 'NV', aliases: ['next visit', 'next appointment', { say: 'nv', mid: true }, { say: 'n v', mid: true }] };
+  const NOTES = { key: 'notes', label: 'Notes', aliases: ['notes', 'note', 'comments', 'other'], optional: true };
+  const U = { key: 'u', label: 'Upper', short: 'U', aliases: ['upper', 'upper arch', 'maxillary', 'maxillary arch', 'u'], guard: ARCH_GUARD };
+  const L = { key: 'l', label: 'Lower', short: 'L', aliases: ['lower', 'lower arch', 'mandibular', 'mandibular arch'], guard: ARCH_GUARD };
+  const ELAS = { key: 'elastics', label: 'Elastics', short: 'E', aliases: ['elastics', 'elastic', 'elastic pattern', 'rubber bands', 'rubber band', { say: 'no elastics', put: 'None' }] };
+
+  const DEFAULT_TEMPLATES = [
+    {
+      id: 'consult', name: 'Consult', fields: [
+        { key: 'cc', label: 'Chief Complaint', short: 'CC', aliases: ['chief complaint', 'chief complaints', 'chief complained', 'chief complain', 'chief compliant', 'chief concern', 'cheap complaint', 'she complained', 'chief complaining', 'cc', 'c c', 'see see', 'c.c.'] },
+        { key: 'ldv', label: 'Last Dental Visit', short: 'LDV', aliases: ['last dental visit', { say: 'ldv', mid: true }, 'l d v', 'last visit', 'last cleaning', 'last checkup', 'last check up'] },
+        { key: 'dentist', label: 'Dentist', aliases: ['dentist', 'general dentist', 'referring dentist'] },
+        { key: 'tmj', label: 'TMJ', aliases: ['tmj', 't m j', 'jaw joint', 'joints', { say: 'no tmj issues', put: 'None' }, { say: 'no tmj problems', put: 'None' }, { say: 'no tmj', put: 'None' }] },
+        { key: 'sleep', label: 'Sleep', aliases: ['sleep', 'airway', { say: 'no sleep issues', put: 'None' }, { say: 'no sleep problems', put: 'None' }, { say: 'no sleep apnea', put: 'None' }] },
+        { key: 'skel', label: 'Skeletal Class', roman: true, aliases: ['skeletal class', 'skeletal'] },
+        { key: 'trans', label: 'Transverse', aliases: ['transverse'] },
+        { key: 'div', label: 'Divergence', aliases: ['divergence', 'vertical'] },
+        { key: 'dentition', label: 'Dentition', aliases: ['dentition'] },
+        { key: 'angle', label: 'Angle Class', roman: true, aliases: ['angle class', "angle's class", 'angles class', 'molar class', 'angle'] },
+        { key: 'canine', label: 'Canine Class', roman: true, aliases: ['canine class', 'canine'] },
+        { key: 'ob', alt: ['OB'], label: 'Overbite', aliases: ['overbite', 'over bite', { say: 'ob', mid: true }, { say: 'o b', mid: true }, { say: 'o.b.', mid: true }, { say: 'over by', fill: ['ob', 'oj'] }, { say: 'over buy', fill: ['ob', 'oj'] }, { say: 'over bye', fill: ['ob', 'oj'] }] },
+        { key: 'oj', alt: ['OJ'], label: 'Overjet', aliases: ['overjet', 'over jet', { say: 'oj', mid: true }, { say: 'o j', mid: true }, { say: 'o.j.', mid: true }, 'overjets'] },
+        { key: 'xb', alt: ['XB', 'CxB'], label: 'Crossbite', aliases: ['crossbite', 'cross bite', 'crossbites', { say: 'cxb', mid: true }, { say: 'c x b', mid: true }, { say: 'xb', mid: true }, { say: 'x b', mid: true }, 'cross b', { say: 'no crossbite', put: 'None' }, { say: 'no crossbites', put: 'None' }] },
+        { key: 'max', label: 'Maxillary', aliases: ['maxillary', 'maxillary arch', 'upper arch', 'maxilla'], guard: ARCH_GUARD },
+        { key: 'mand', label: 'Mandibular', aliases: ['mandibular', 'mandibular arch', 'lower arch', 'mandible'], guard: ARCH_GUARD },
+        { key: 'umid', label: 'Upper Midline', short: 'U Midline', aliases: ['upper midline', 'u midline', 'you midline', 'maxillary midline', 'upper dental midline', 'midline upper', 'upper mid', { say: 'uml', mid: true }, { say: 'u ml', mid: true }, { say: 'u m l', mid: true }, { say: 'you ml', mid: true }, { say: 'you m l', mid: true }, 'upper ml', { say: 'umid', mid: true }] },
+        { key: 'lmid', label: 'Lower Midline', short: 'L Midline', aliases: ['lower midline', 'l midline', 'mandibular midline', 'lower dental midline', 'midline lower', 'lower mid', { say: 'lml', mid: true }, { say: 'l ml', mid: true }, { say: 'l m l', mid: true }, { say: 'el ml', mid: true }, 'lower ml', { say: 'lmid', mid: true }] },
+        { key: 'cos', alt: ['CoS'], label: 'Curve of Spee', aliases: ['curve of spee', 'curve of spe', 'curve of speed', 'curve of spy', 'curve of see', 'curve of c', 'curve', { say: 'cos', mid: true }, { say: 'c o s', mid: true }, { say: 'c.o.s.', mid: true }] },
+        { key: 'missing', label: 'Missing Teeth', aliases: ['missing teeth', 'missing tooth', 'congenitally missing', 'missing',
+          { say: 'no missing teeth', put: 'None' }, { say: 'no missing tooth', put: 'None' }, { say: 'none missing', put: 'None' }, { say: 'nothing missing', put: 'None' }] },
+        { key: 'impacted', label: 'Impacted Teeth', aliases: [{ say: 'possible impacted', put: 'Poss' }, { say: 'possibly impacted', put: 'Poss' }, { say: 'possible impaction of', put: 'Poss' }, { say: 'possible impaction', put: 'Poss' }, 'impacted teeth', 'impacted tooth', 'impactions', 'impaction', 'impacted',
+          { say: 'no impacted teeth', put: 'None' }, { say: 'no impacted tooth', put: 'None' }, { say: 'no impactions', put: 'None' }, { say: 'none impacted', put: 'None' }, { say: 'nothing impacted', put: 'None' }] },
+        { key: 'oh', label: 'Oral Hygiene', short: 'OH', aliases: ['oral hygiene', { say: 'oh', mid: true }, { say: 'o h', mid: true }, 'hygiene'] },
+        { key: 'tx', label: 'Treatment', short: 'Tx', aliases: ['treatment', 'tx', 't x', 'treatment type'] },
+        { key: 'txp', label: 'Treatment Plan', short: 'TxP', aliases: ['treatment plan', { say: 'txp', mid: true }, 't x p', 'tx plan', 'plan', 'treatment options', 'options'] },
+        { key: 'time', label: 'Time', aliases: ['time', 'treatment time', 'estimated time', 'tx time'] },
+        NV, NOTES
+      ]
+    },
+    {
+      id: 'recall', name: 'Recall', fields: [
+        { key: 'exam', label: 'Exam', short: 'E', aliases: ['exam', 'examination'] },
+        { key: 'dentition', label: 'Dentition', aliases: ['dentition'] },
+        { key: 'oh', label: 'Oral Hygiene', short: 'OH', aliases: ['oral hygiene', { say: 'oh', mid: true }, { say: 'o h', mid: true }, 'hygiene'] },
+        { key: 'tx', label: 'Treatment', short: 'Tx', aliases: ['treatment', 'tx', 'recommendation', 'plan'] },
+        NV, NOTES
+      ]
+    },
+    {
+      id: 'adjust', name: 'Adjustment', fields: [
+        { key: 'exam', label: 'Exam', short: 'E', aliases: ['exam', 'examination'] },
+        { key: 'bb', label: 'Broken Bracket', short: 'BB', aliases: ['broken bracket', 'broken brackets', 'bb', 'b b', 'broken', { say: 'no broken brackets', put: 'None' }, { say: 'no broken bracket', put: 'None' }, { say: 'no bb', put: 'None' }] },
+        U, L, ELAS, NV, NOTES
+      ]
+    },
+    {
+      id: 'bond', name: 'Bonding', fields: [
+        { key: 'bond', label: 'Bond', sep: ' ', aliases: ['bond', 'bonded', 'bonding'] },
+        U, L, ELAS, NV, NOTES
+      ]
+    },
+    {
+      id: 'repo', name: 'Repositioning', fields: [
+        { key: 'exam', label: 'Exam', short: 'E', aliases: ['exam', 'examination'], optional: true },
+        { key: 'repo', label: 'Repositioned', aliases: ['reposition', 'repositioned', 'repositioning', 'repo', 'rebond', 'rebonded'] },
+        U, L, ELAS, NV, NOTES
+      ]
+    },
+    {
+      id: 'deliver', name: 'Appliance Delivery', fields: [
+        { key: 'seps', label: 'Separators', short: 'Seps', aliases: ['separators', 'separator', 'seps', 'removed separators'] },
+        { key: 'delivered', label: 'Delivered', aliases: ['delivered', 'deliver', 'delivery', 'appliance'] },
+        { key: 'material', label: 'Cemented with', aliases: ['cemented with', 'cemented', 'cement', 'material', 'bonded with'] },
+        { key: 'turns', label: 'Turns', aliases: ['turns', 'rpe turns', 'activation', 'activations', 'turn'] },
+        { key: 'instr', label: 'Instructions', aliases: ['instructions', 'instructed', 'reviewed'], optional: true },
+        { key: 'next', label: 'Next steps', aliases: ['next steps', 'next step'] },
+        NV, NOTES
+      ]
+    },
+    {
+      id: 'removal', name: 'Appliance Removal', fields: [
+        { key: 'removed', label: 'Removed', aliases: ['removed', 'remove', 'removal'] },
+        { key: 'exam', label: 'Exam', short: 'E', aliases: ['exam', 'examination'], optional: true },
+        { key: 'next', label: 'Next steps', aliases: ['next steps', 'next step'] },
+        NV, NOTES
+      ]
+    },
+    {
+      id: 'debond', name: 'Debond', fields: [
+        { key: 'debond', label: '', sep: '', aliases: ['debond', 'debonded'],
+          def: 'Removed appliances and glue. Took full records and referred to imaging center for ceph and IO scan.' },
+        { key: 'ret', label: 'Retainers', aliases: ['retainers', 'retainer', 'retention'], optional: true },
+        NV, NOTES
+      ]
+    }
+  ];
+
+  /* ------------------------------------------------------------------ */
+  /* NORMALIZER                                                           */
+  /* ------------------------------------------------------------------ */
+  const SMALL = { zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+    eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19 };
+  const TENS = { twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+  const SMALL_RE = Object.keys(SMALL).join('|');
+  const TENS_RE = Object.keys(TENS).join('|');
+
+  function wordsToDigits(s) {
+    s = s.replace(new RegExp('\\b(' + TENS_RE + ')[\\s-](one|two|three|four|five|six|seven|eight|nine)\\b', 'gi'),
+      (m, a, b) => String(TENS[a.toLowerCase()] + SMALL[b.toLowerCase()]));
+    s = s.replace(new RegExp('\\b(' + TENS_RE + ')\\b', 'gi'), m => String(TENS[m.toLowerCase()]));
+    s = s.replace(new RegExp('\\b(' + SMALL_RE + ')\\b', 'gi'), m => String(SMALL[m.toLowerCase()]));
+    s = s.replace(/\b(oh|o)\b(?=\s*\d)/gi, '0'); // "oh one four"
+    return s;
+  }
+
+  const TOOTH_NAMES = [
+    [/(?:primary|baby|deciduous)\s+(?:1st|first)\s+molar/, 'D'], [/(?:primary|baby|deciduous)\s+(?:2nd|second)\s+molar/, 'E'],
+    [/(?:primary|baby|deciduous)\s+(?:canine|cuspid)/, 'C'], [/(?:primary|baby|deciduous)\s+lateral(?:\s+incisor)?/, 'B'],
+    [/(?:primary|baby|deciduous)\s+central(?:\s+incisor)?/, 'A'],
+    [/central(?:\s+incisor)?/, '1'], [/lateral(?:\s+incisor)?/, '2'], [/canine|cuspid|eye\s?tooth/, '3'],
+    [/(?:1st|first)\s+(?:premolar|bicuspid)/, '4'], [/(?:2nd|second)\s+(?:premolar|bicuspid)/, '5'],
+    [/(?:1st|first)\s+molar|6\s*year\s+molar/, '6'], [/(?:2nd|second)\s+molar|12\s*year\s+molar/, '7'],
+    [/(?:3rd|third)\s+molar|wisdom\s+tooth/, '8']
+  ];
+  const TOOTH_NAME_ALT = TOOTH_NAMES.map(t => t[0].source).join('|');
+  const ARCH = '(upper|lower|maxillary|mandibular)';
+  const SIDE = '(right|left)';
+  const archLetter = a => /^(u|upper|maxillary)$/i.test(a) ? 'U' : 'L';
+  const sideLetter = s => /^r/i.test(s) ? 'R' : 'L';
+  const MISHEARD_TOOTH = { to: '2', too: '2', for: '4', fore: '4', ate: '8', won: '1', sea: 'C', see: 'C', cee: 'C', ease: 'E', ee: 'E', eee: 'E', dee: 'D', bee: 'B' };
+
+  function toothFromName(name) {
+    for (const [re, v] of TOOTH_NAMES) if (new RegExp('^(?:' + re.source + ')$', 'i').test(name)) return v;
+    return '?';
+  }
+
+  // [regex, replacement] — applied in order, case-insensitive
+  const TERM_RULES = [
+    // wire materials
+    [/\bheat[- ]?activated\s+(niti|nitinol|nickel[- ]titanium|nighty|nitty)\b/gi, 'HA NiTi'],
+    [/\b(thermal|super[- ]?elastic)\s+(niti|nitinol)\b/gi, 'HA NiTi'],
+    [/\bcopper\s+(niti|nickel[- ]titanium|nighty|nitty)\b/gi, 'CuNiTi'],
+    [/\b(niti|nitinol|nighty|nightie|nitty|nittie|neati|knee tee|knit tie|night tea|n\.? ?i\.? ?t\.? ?i\.?|nickel[- ]titanium)\b/gi, 'NiTi'],
+    [/\bstainless(?:[- ]steel)?\b/gi, 'SS'], [/\bs\.? ?s\.?(?=\s|$|[,.;])/gi, 'SS'],
+    [/\b(t\.? ?m\.? ?a\.?|beta[- ]titanium|beta[- ]ti)\b/gi, 'TMA'],
+    [/\breverse[- ]curve\b/gi, 'RC'],
+    // appliances & records
+    [/\b(rapid (?:palatal|maxillary) expander|r\.? ?p\.? ?e\.?)\b/gi, 'RPE'],
+    [/\b(trans[- ]?palatal arch|t\.? ?p\.? ?a\.?)\b/gi, 'TPA'],
+    [/\b(lower lingual holding arch|lower lingual arch|l\.? ?l\.? ?h\.? ?a\.?)\b/gi, 'LLHA'],
+    [/\bnance\b/gi, 'Nance'], [/\bherbst\b/gi, 'Herbst'], [/\bfor ?sus\b/gi, 'Forsus'], [/\bhawley\b/gi, 'Hawley'],
+    [/\b(essix|essex)\b/gi, 'Essix'], [/\bvivera\b/gi, 'Vivera'], [/\binvisalign\b/gi, 'Invisalign'],
+    [/\btemporary anchorage devices?\b/gi, m => /s$/i.test(m) ? 'TADs' : 'TAD'], [/\bt\.? ?a\.? ?d\.? ?s\b|\btads\b/gi, 'TADs'], [/\btad\b/gi, 'TAD'],
+    [/\b(intra[- ]?oral|i\.? ?o\.?) scan\b/gi, 'IO scan'],
+    [/\b(cephalometric(?: x[- ]?ray| radiograph)?|ceph|cef|sef)\b/gi, 'ceph'],
+    [/\b(panoramic(?: x[- ]?ray| radiograph)?|pano)\b/gi, 'pano'],
+    [/\b(c\.? ?b\.? ?c\.? ?t\.?|cone beam(?: ct)?)\b/gi, 'CBCT'],
+    [/\b(interproximal reduction|i\.? ?p\.? ?r\.?)\b/gi, 'IPR'],
+    [/\bt\.? ?m\.? ?j\.?\b/gi, 'TMJ'],
+    [/\boral hygiene instructions\b/gi, 'OHI'],
+    [/\bwithin normal limits\b/gi, 'WNL'],
+    [/\bbroken brackets?\b/gi, 'BB'],
+    [/\bself[- ]ligating\b/gi, 'self-ligating'], [/\be[- ]chain\b/gi, 'e-chain'],
+    [/\bketac\b/gi, 'Ketac'], [/\btransbond\b/gi, 'Transbond'], [/\bband[- ]?(lok|lock)\b/gi, 'Band-Lok'], [/\bfuji\b/gi, 'Fuji'],
+    [/\bphase\s*(1|i|one)\b/gi, 'Ph I'], [/\bphase\s*(2|ii|two)\b/gi, 'Ph II'],
+    [/\btreatment plan\b/gi, 'TxP'], [/\btreatment\b/gi, 'tx'],
+    [/\bdoctor\s+(?=[A-Z])/gi, 'Dr. '], [/\bdr\.?\s+(?=[A-Za-z])/gi, 'Dr. '],
+    [/\bpatient\b/gi, 'pt'], [/\bpatients\b/gi, 'pts'],
+    [/\bend[- ]on\b/gi, 'end on'],
+    [/\bbite[- ]?(?:turbos?|ramps?)\b/gi, 'BTs'], [/\bbonding\s+(?=BTs\b)/gi, 'bond '],
+    [/\bspark\b/gi, 'Spark'], [/\bpanorex\b/gi, 'pano'],
+    // classes
+    [/\bclass\s*(1|i|one|won)\b/gi, 'Class I'], [/\bclass\s*(2|ii|two|to|too)\b/gi, 'Class II'], [/\bclass\s*(3|iii|three)\b/gi, 'Class III'],
+    [/\b(division|div\.?)\s*(1|one)\b/gi, 'div 1'], [/\b(division|div\.?)\s*(2|two|to)\b/gi, 'div 2'],
+    // cusp fractions
+    [/\bhalf\s+(?:a\s+)?cusp\b/gi, '1/2 cusp'], [/\b(?:a\s+)?quarter\s+cusp\b/gi, '1/4 cusp'], [/\b3\s+quarters?\s+(?:of\s+a\s+)?cusp\b/gi, '3/4 cusp']
+  ];
+
+  function normalize(input, custom) {
+    let s = ' ' + input + ' ';
+    // user replacements first (heard => write)
+    for (const [from, to] of custom || []) {
+      if (!from) continue;
+      s = s.replace(new RegExp('\\b' + escapeRe(from) + '\\b', 'gi'), to);
+    }
+    // spoken punctuation
+    s = s.replace(/\b(new line|next line|newline)\b/gi, '\n')
+      .replace(/\b(full stop|period)\b/gi, '.')
+      .replace(/\bcomma\b/gi, ',')
+      .replace(/\bsemicolon\b/gi, ';')
+      .replace(/\b(colon)\b/gi, ':')
+      .replace(/\bslash\b/gi, '/')
+      .replace(/\b(open paren(?:thesis)?|open bracket)\b/gi, '(')
+      .replace(/\b(close paren(?:thesis)?|close bracket)\b/gi, ')')
+      .replace(/\b(dash|hyphen)\b/gi, '-')
+      .replace(/\bplus\b/gi, '+')
+      .replace(/\bnumber\s+(?=\d)/gi, '#');
+
+    // Palmer by tooth name: "upper right lateral incisor" -> UR2 (before number conversion)
+    s = s.replace(new RegExp('\\b' + ARCH + '\\s+' + SIDE + '\\s+(' + TOOTH_NAME_ALT + ')\\b', 'gi'),
+      (m, a, sd, name) => archLetter(a) + sideLetter(sd) + toothFromName(name));
+
+    s = wordsToDigits(s);
+    // plural tooth numbers: "upper fives and threes" -> "upper 5s and 3s"
+    const PL = { ones: 1, twos: 2, threes: 3, fours: 4, fives: 5, sixes: 6, sevens: 7, eights: 8 };
+    const PLR = '(ones|twos|threes|fours|fives|sixes|sevens|eights)';
+    s = s.replace(new RegExp('\\b(upper|lower|U|L)\\s+' + PLR + '\\b', 'gi'), (m, a, w) => a + ' ' + PL[w.toLowerCase()] + 's');
+    for (let i = 0; i < 3; i++) s = s.replace(new RegExp('\\b(\\ds)(,?\\s+(?:and|&)?\\s*)' + PLR + '\\b', 'gi'), (m, a, j, w) => a + j + PL[w.toLowerCase()] + 's');
+    // primary-tooth letters as heard: "sea/see" = C, "ease" = E, "CNE" = C and E
+    s = s.replace(/\bc\s*n\s*e\b/gi, 'C and E').replace(/\bc\s*&\s*e\b/gi, 'C and E');
+    s = s.replace(/\b(upper|lower)\s+(?:seas|sees|cees|c's|cs)\s+(?:these|to|through|thru|-)\s*(?:ease|e's|es|ees)?(?=\s|$|[,.])/gi, (m, a) => archLetter(a) + 'C-Es');
+    s = s.replace(/\b(upper|lower)\s+(?:seas|sees|cees|c's|cs)\b/gi, (m, a) => archLetter(a) + 'Cs')
+      .replace(/\b(upper|lower)\s+(?:ease|ees|e's|es|eees)\b/gi, (m, a) => archLetter(a) + 'Es')
+      .replace(/\b(upper|lower)\s+(?:dees|d's|ds)\b/gi, (m, a) => archLetter(a) + 'Ds');
+    s = s.replace(/(?<!\b(?:with|at|more|less)\s)\b(?:ease|e's|ees)\b/gi, 'Es').replace(/\b(?:c's|seas)\b/gi, 'Cs')
+      .replace(/\b(Cs|Ds|Es|C-Es)\s+(?:and|&)\s+(?:sees|cs)\b/g, '$1 and Cs');
+
+    // Palmer by number/letter: "upper right 2", "U R 2", "lower left E"
+    s = s.replace(new RegExp('\\b(upper|lower|maxillary|mandibular|u|l)[\\s-]*(right|left|r|l)[\\s-]*([1-8]|[a-e]|to|too|for|fore|ate|won|sea|see|cee|ease|ee|eee|dee|bee)\\b(?![\\w/])', 'gi'),
+      (m, a, sd, t) => archLetter(a) + sideLetter(sd) + (MISHEARD_TOOTH[t.toLowerCase()] || t.toUpperCase()));
+    // "URC and E" -> "URC/E"
+    s = s.replace(/\b([UL][RL])([A-E])\s*(?:and|&|n)\s*([A-E])\b(?![\w'])/g, '$1$2/$3');
+    // common mishearings of the spoken letters
+    s = s.replace(/\byou\s*are\s*([1-8])\b/gi, 'UR$1').replace(/\byou\s*(?:l|el|ell)\s*([1-8])\b/gi, 'UL$1')
+      .replace(/\bel+\s*(?:are|r)\s*([1-8])\b/gi, 'LR$1').replace(/\bel+\s*el+\s*([1-8])\b/gi, 'LL$1');
+    // Ensure palmer tokens are upper case (e.g. typed "ur2")
+    s = s.replace(/\b([ul])([rl])([1-8a-e])\b/gi, (m, a, b, c) => (a + b + c).toUpperCase());
+
+    // Arch ranges: "upper and lower 6 to 6" -> "U and L 6-6", "upper 6 to 6" -> "U6-6"
+    s = s.replace(/\b(?:upper|u)\s*(?:and|&)\s*(?:lower|l)\s*([1-8])\s*(?:to|through|thru|-)\s*([1-8])\b/gi, 'U and L $1-$2');
+    s = s.replace(/(?<!\band\s)\b(upper|lower|u|l)\s*([1-8])\s*(?:to|through|thru|-)\s*([1-8])\b/gi, (m, a, x, y) => archLetter(a) + x + '-' + y);
+
+    // Wires
+    s = s.replace(/\bpoint\s*(?=\d)/gi, '.');
+    s = s.replace(/(^|[^\d.\w])\.?\s*0\s+(\d)\s+(\d)\b/g, (m, p, a, b) => p + '.0' + a + b);    // ". 0 1 6" / "0 1 6"
+    s = s.replace(/(^|[^\d.\w])\.?0\s*(1[0-9]|2[0-9])\b(?!\s*(?:%|mm|percent|weeks?|months?))/g, (m, p, a) => p + '.0' + a); // "0 16" / "016"
+    const W = '\\.?0?(1[2-9]|2[0-8])';
+    s = s.replace(new RegExp('(^|[^\\d.\\w])' + W + '\\s*(?:by|x|×|\\*|times)\\s*' + W + '\\b', 'gi'),
+      (m, p, a, b) => p + '.0' + a + 'x.0' + b);
+    s = s.replace(/(^|[^\d.\w])(16|17|18|19|21)(16|22|25|28)\b/g, (m, p, a, b) => p + '.0' + a + 'x.0' + b); // "1622"
+    for (const [re, rep] of TERM_RULES) s = s.replace(re, rep);
+    // round wire size before material: "14 NiTi" -> ".014 NiTi"
+    s = s.replace(/(^|[^\d.\w/])(12|14|16|18|20)\s+(?=(?:HA |Cu)?NiTi\b|CuNiTi\b|SS\b|TMA\b|wire\b|braided\b|RC\b)/g, (m, p, a) => p + '.0' + a + ' ');
+    // material before size: "NiTi 14" -> ".014 NiTi"
+    s = s.replace(/\b((?:HA )?NiTi|CuNiTi|SS|TMA)\s+(12|14|16|18|20)\b(?!\s*(?:x|by))/g, '.0$2 $1');
+
+    // Elastic sizes & forces
+    s = s.replace(/\b(?:a\s+)?quarter(?:[- ]inch|\s+in\b)/gi, '1/4"')
+      .replace(/\b(\d)\s*(?:\/\s*)?(?:16ths?|sixteenths?)\b(?:\s*(?:of an\s+)?(?:inch|in\b))?/gi, '$1/16"')
+      .replace(/\b(?:an|a)\s+eighth\b(?:\s*(?:of an\s+)?inch)?/gi, '1/8"')
+      .replace(/\b(\d)\s*(?:8ths?|eighths?)\b(?:\s*(?:of an\s+)?inch)?/gi, '$1/8"')
+      .replace(/\b(\d{1,2}\/\d{1,2})\s*(?:inch(?:es)?|in\b|")/gi, '$1"')
+      .replace(/""/g, '"');
+    s = s.replace(/\b(\d+)\s+and\s+(?:a\s+)?half\s+(?:ounces?|oz)\b/gi, '$1.5 oz')
+      .replace(/\b(\d+(?:\.\d+)?)\s*(?:ounces?|oz)\b\.?/gi, '$1 oz');
+
+    // Measurements & time
+    s = s.replace(/\bhalf\s+(?:a\s+)?(?:millimeters?|millimetres?|mm)\b/gi, '0.5mm')
+      .replace(/(\d+(?:\.\d+)?|\.\d+)\s*(?:millimeters?|millimetres?|mm|mils?)\b/gi, (m, n) => (n[0] === '.' ? '0' + n : n) + 'mm')
+      .replace(/(\d+(?:\.\d+)?)\s*(?:percent|per cent)\b/gi, '$1%')
+      .replace(/\b(\d+(?:\.\d+)?)\s*weeks?\b/gi, (m, n) => n + (n === '1' ? ' wk' : ' wks'))
+      .replace(/\b(\d+(?:\.\d+)?)\s*months?\b/gi, (m, n) => n + ' mo')
+      .replace(/\b(\d+(?:\.\d+)?)\s*years?\b/gi, (m, n) => n + (n === '1' ? ' yr' : ' yrs'));
+
+    // Bare tooth ranges "3 to 3" -> "3-3" (after units so "2 to 3 wks" -> "2-3 wks")
+    s = s.replace(/\b([1-8])\s+(?:to|through|thru)\s+([1-8])\b/gi, '$1-$2');
+
+    // tidy
+    s = s.replace(/[ \t]+/g, ' ')
+      .replace(/ *\n */g, '\n')
+      .replace(/\s+([,;:)%]|\.(?!\d))/g, '$1')
+      .replace(/\(\s+/g, '(')
+      .replace(/([.,;:])(?=[A-Za-z])/g, '$1 ')
+      .trim();
+    return s;
+  }
+
+  /* field-specific cleanup after normalizing, e.g. "skeletal class one" -> "I" */
+  function postField(field, text) {
+    if (field && field.roman) text = text.replace(/^(?:Class\s+)?([123])\b/i, (m, n) => ['I', 'II', 'III'][n - 1]);
+    if (field && field.roman) text = text.replace(/^Class\s+(I{1,3})\b/, '$1');
+    if (field && field.key === 'div') text = text.replace(/^(normal|normo|average|WNL)\b/i, 'Normodivergent').replace(/^(hyper|high angle)\b/i, 'Hyperdivergent').replace(/^(hypo|low angle)\b/i, 'Hypodivergent');
+    return text;
+  }
+
+  function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+  function parseCustom(text) {
+    return (text || '').split(/\n/).map(l => l.split(/=>|→/)).filter(p => p.length === 2)
+      .map(([a, b]) => [a.trim(), b.trim()]).filter(p => p[0]);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* SEGMENT ROUTER (field switching + voice commands)                    */
+  /* ------------------------------------------------------------------ */
+  function compileTemplate(tpl) {
+    const list = [];
+    tpl.fields.forEach((f, idx) => (f.aliases || []).forEach(a => {
+      const o = typeof a === 'string' ? { say: a } : a;
+      list.push({ alias: o.say.toLowerCase(), put: o.put, fill: o.fill, mid: o.mid, field: f, idx });
+    }));
+    list.order = tpl.fields.map(f => f.key);
+    list.sort((x, y) => y.alias.length - x.alias.length);
+    list.forEach(e => {
+      const guard = e.field.guard ? '(?![\\s-]+(?:right|left|and|&)\\b)' : '';
+      const body = escapeRe(e.alias).replace(/ /g, '[\\s-]+');
+      const verbGuard = !e.alias.includes(' ') ? '(?!\\s+(?:has|have|had|improved|got|seems|seemed|gets)\\b)' : '';
+      const midGuard = e.field.guard ? '(?![\\s-]+(?:[1-8]|one|two|three|four|five|six|seven|eight)\\s*(?:to|through|thru|-)\\s*(?:[1-8]|one|two|three|four|five|six|seven|eight)\\b)' : '';
+      e.body = new RegExp('^' + body + '\\b', 'i');
+      e.start = new RegExp('^' + body + '\\b' + guard + midGuard + '[\\s,:.\\-]*(?:(?:is|are|was|were|colon)\\b[\\s,:]*)?', 'i');
+      const blockers = (e.alias.includes(' ') || e.mid ? [] : CONTENT_BEFORE).concat(e.field.guard ? ['and', '&'] : []);
+      const before = blockers.length ? '(?<!\\b(?:' + blockers.join('|') + ')\\s)' : '';
+      e.any = new RegExp('(^|[\\s,.;])' + before + body + '\\b' + guard + midGuard + verbGuard, 'i');
+      e.multi = !!e.mid || (e.alias.length >= 3 && !MID_SKIP.includes(e.alias)); // eligible for mid-sentence detection
+      if (e.mid && /^o\.? ?h\.?$/.test(e.alias)) { // "OH" but not "oh one four" (a wire size)
+        const ng = '(?!\\s*(?:\\d|zero|one|two|three|four|five|six|seven|eight|nine|o\\b|oh\\b))';
+        e.start = new RegExp(e.start.source.replace(/^\^([^\[(]*?\\b)/, '^$1' + ng), 'i');
+        e.any = new RegExp(e.any.source + ng, 'i');
+      }
+      e.anywhere = e.multi && !e.mid && !e.field.guard && (e.alias.includes(' ') || ANY_SINGLE.includes(e.alias));
+    });
+    return list;
+  }
+
+  // too generic to trigger a field jump in the middle of a sentence
+  const MID_SKIP = ['c c', 't x', 'b b', 'see', 'plan', 'curve', 'angle', 'vertical', 'joints', 'other', 'note', 'notes', 'comments', 'broken', 'appliance',
+    'cement', 'remove', 'removal', 'delivery', 'deliver', 'reviewed', 'instructed', 'hygiene', 'material', 'retention', 'airway'];
+  const MID_WINDOW = 6; // generic one-word names: mid-sentence, only jump forward up to this many fields
+  // distinctive one-word names that may jump to their field from anywhere, in any order
+  const ANY_SINGLE = ['overbite', 'overjet', 'overjets', 'crossbite', 'crossbites', 'transverse', 'divergence', 'dentition',
+    'tmj', 'ldv', 'txp', 'dentist', 'skeletal', 'elastics', 'repositioned', 'reposition', 'separators', 'retainers'];
+  // a field name right after one of these words is part of the sentence, not a field jump ("posterior crossbite", "big overjet")
+  const CONTENT_BEFORE = ['posterior', 'anterior', 'lateral', 'unilateral', 'bilateral', 'buccal', 'lingual', 'scissor', 'single',
+    'correct', 'correcting', 'corrected', 'fix', 'fixing', 'reduce', 'reducing', 'expand', 'the', 'a', 'an', 'of', 'for', 'to',
+    'with', 'my', 'your', 'our', 'his', 'her', 'their', 'deep', 'big', 'large', 'small', 'increased', 'decreased', 'reduced',
+    'excess', 'excessive', 'mild', 'moderate', 'severe', 'mixed', 'permanent', 'primary', 'early', 'late', 'at', 'on', 'by',
+    'until', 'before', 'after', 'during', 'about', 'discussed', 'discuss', 'his', 'new', 'old', 'previous', 'family',
+    'different', 'same', 'other', 'another', 'general', 'regular', 'pediatric', 'any', 'see', 'saw', 'sees'];
+
+  const CMD = {
+    next: /^(?:next field|next|skip(?: field)?)\b(?!\s*(?:visit|appointment|steps?|line))[\s,.]*/i,
+    prev: /^(?:previous field|previous|go back|back)\b[\s,.]*/i,
+    undo: /^(?:scratch that|delete that|undo(?: that)?|strike that)\b[\s,.]*/i,
+    clear: /^(?:clear (?:field|that|this))\b[\s,.]*/i,
+    stop: /^(?:stop (?:listening|dictation|dictating)|pause dictation)\b[\s,.]*/i,
+    goto: /^(?:go to|jump to|field)\s+/i,
+    copy: /^(?:copy note|copy the note)\b[\s,.]*/i,
+    insert: /^(?:insert note|insert the note|paste note)\b[\s,.]*/i
+  };
+
+  function lev(a, b) {
+    const m = a.length, n = b.length; if (!m) return n; if (!n) return m;
+    let prev = Array.from({ length: n + 1 }, (_, j) => j);
+    for (let i = 1; i <= m; i++) {
+      const cur = [i];
+      for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = cur;
+    }
+    return prev[n];
+  }
+  /* A field name that Chrome slightly misheard at the start of a phrase ("chief complained", "overbites") */
+  function fuzzyStart(text, compiled) {
+    const words = text.trim().split(/\s+/);
+    let best = null;
+    for (const e of compiled) {
+      if (e.put || e.fill || e.field.guard || e.mid) continue;
+      const n = e.alias.split(' ').length, len = e.alias.length;
+      if ((n === 1 && len < 7) || (n > 1 && len < 8) || words.length < n) continue;
+      if (!/^[a-z]/i.test(words[0]) || words[0][0].toLowerCase() !== e.alias[0]) continue;
+      const cand = words.slice(0, n).join(' ').toLowerCase().replace(/[^a-z' ]/g, '').trim();
+      const tol = n === 1 ? (len >= 10 ? 2 : 1) : Math.floor(len * 0.25);
+      const d = lev(cand, e.alias);
+      if (d <= tol && (!best || d < best.d || (d === best.d && n > best.n))) best = { e, d, n };
+    }
+    if (!best) return null;
+    const m = text.match(new RegExp('^\\s*(?:\\S+\\s+){' + (best.n - 1) + '}\\S+'));
+    return { e: best.e, len: m[0].length };
+  }
+
+  /* Pure router: returns list of actions so it can be unit-tested */
+  function routeSegment(raw, compiled, opts) {
+    const actions = [];
+    let text = preFix(raw, opts && opts.custom).replace(/^\s*(?:um+|uh+|so|okay|ok)[\s,]+/i, '').trim();
+    // mid-segment "scratch that": discard what came before it in this segment
+    const sIdx = text.search(/\b(?:scratch that|strike that)\b/i);
+    if (sIdx > 0) text = text.slice(sIdx).replace(/^(?:scratch that|strike that)[\s,.]*/i, '').trim();
+    let guardLoop = 0;
+    const order = compiled.order || [];
+    let cur = Math.max(0, order.indexOf(opts && opts.activeKey));
+    // right after a field name, another field name is content ("chief complaint crossbite")
+    let afterLabel = !!(opts && opts.justLabeled && opts.activeKey === 'cc');
+    const toField = e => {
+      actions.push({ type: 'field', key: e.field.key, fill: e.fill }); cur = e.idx;
+      if (e.put) { actions.push({ type: 'text', text: e.put }); afterLabel = false; } else afterLabel = true;
+    };
+    while (text && guardLoop++ < 300) {
+      text = text.replace(/^[\s,.;:]+/, '');
+      if (!text) break;
+      let m;
+      if ((m = text.match(CMD.undo))) { actions.push({ type: 'undo' }); text = text.slice(m[0].length); continue; }
+      if ((m = text.match(CMD.clear))) { actions.push({ type: 'clear' }); text = text.slice(m[0].length); continue; }
+      if ((m = text.match(CMD.stop))) { actions.push({ type: 'stop' }); text = text.slice(m[0].length); continue; }
+      if ((m = text.match(CMD.copy))) { actions.push({ type: 'copy' }); text = text.slice(m[0].length); continue; }
+      if ((m = text.match(CMD.insert))) { actions.push({ type: 'insert' }); text = text.slice(m[0].length); continue; }
+      if ((m = text.match(CMD.next))) { actions.push({ type: 'next' }); text = text.slice(m[0].length); continue; }
+      if ((m = text.match(CMD.prev))) { actions.push({ type: 'prev' }); text = text.slice(m[0].length); continue; }
+      if ((m = text.match(CMD.goto))) text = text.slice(m[0].length);
+      let hit = compiled.find(e => e.start.test(text));
+      if (!hit) {
+        const fz = fuzzyStart(text, compiled);
+        if (fz) {
+          if (afterLabel) { actions.push({ type: 'text', text: text.slice(0, fz.len) }); text = text.slice(fz.len); afterLabel = false; continue; }
+          toField(fz.e);
+          text = text.slice(fz.len).replace(/^[\s,:.\-]*(?:(?:is|are|was|were|colon)\b[\s,:]*)?/i, '');
+          continue;
+        }
+      }
+      if (hit && afterLabel && !hit.put && !hit.fill) {
+        const word = text.match(hit.body)[0];
+        actions.push({ type: 'text', text: word });
+        text = text.slice(word.length); afterLabel = false;
+        continue;
+      }
+      if (hit) {
+        const mm = text.match(hit.start);
+        toField(hit);
+        text = text.slice(mm[0].length);
+        continue;
+      }
+      if (opts && opts.midSentence) {
+        let best = null;
+        for (const e of compiled) {
+          if (!e.multi || e.idx === cur) continue;
+          if (!e.anywhere && (e.idx < cur || e.idx > cur + MID_WINDOW)) continue;
+          const mm = e.any.exec(text);
+          if (mm && mm.index > 0 && (!best || mm.index < best.idx)) best = { idx: mm.index + mm[1].length, e };
+        }
+        if (best) {
+          actions.push({ type: 'text', text: text.slice(0, best.idx).trim() }); afterLabel = false;
+          text = text.slice(best.idx);
+          continue;
+        }
+      }
+      actions.push({ type: 'text', text: text.trim() });
+      break;
+    }
+    return actions.filter(a => a.type !== 'text' || a.text);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* MISHEARD PHRASES — fixed on the raw words before field detection    */
+  /* ------------------------------------------------------------------ */
+  const PRE_FIX = [
+    // field names Chrome mishears
+    [/\bover\s+(?:jet|jets|jeff|chef|check|yet|jed|jett|get)\b/gi, 'overjet'],
+    [/\bmid\s*-?\s*lands?\b|\bmid\s+lines?\b|\bmidland\b/gi, m => /s$/i.test(m) ? 'midlines' : 'midline'],
+    [/\b(?:a\s+)?(?:cruise|curb|curve|curves|curl|cur|crib)\s+(?:of\s+)?(?:space|spee|spey|spay|speed|spy|spree|spea|bee|sea|see|c)\b/gi, 'curve of spee'],
+    [/\bchristmas\b(?=\s+(?:is\s+)?(?:deep|flat|normal|mild|moderate|increased|reverse|slight))/gi, 'curve of spee'],
+    [/\b(?:lasted|last|lost)\s+(?:the|time to|time|tenant|dental|dentist|dennis)\s+visits?\b/gi, 'last dental visit'],
+    [/\b(?:less|last|lest|lasted|lost|lesson)\s+(?:than|then|in|of|and|on)?\s*(?:the|a|that)\s+visit\b/gi, 'last dental visit'],
+    [/\blast\s+visit\s+to\s+the\s+dentist\b|\blast\s+time\s+(?:at|to)\s+the\s+dentist\b|\blast\s+dentist\s+visit\b/gi, 'last dental visit'],
+    [/\b(?:or|oral|or a|our)\s+(?:hydrogen|hygiene|hi\s?jean|hygene|high\s?jean|hygienic)\b/gi, 'oral hygiene'],
+    [/\bno\s+teenage\b/gi, 'no TMJ'], [/\bteenage(?=\s+(?:issues?|problems?|pain|clicking|popping|symptoms?|is|was|normal)\b)/gi, 'TMJ'],
+    [/\b(?:I'?m actually|max\s?way|max a lary|maxi\s?larry|maxillae|maximally)\b(?=\s+(?:spacing|crowding|arch|normal|mild|slight|moderate|severe|is|has|midline))/gi, 'maxillary'],
+    [/\bmaxway\b/gi, 'maxillary'],
+    [/\b(?:mandible\s+(?:are|ur|err)|man\s?dibula|man\s?dibbler)\b/gi, 'mandibular'],
+    [/\bpermanent\s*-?\s*(?:ation|dentation|edition|addition|definition)\b|\bpermanentation\b|\bpermanent dentations?\b/gi, 'permanent dentition'],
+    [/\bmixed\s+(?:dentation|edition|addition|definition)\b/gi, 'mixed dentition'],
+    [/\bprimary\s+(?:dentation|edition|addition)\b/gi, 'primary dentition'],
+    [/\bnormal(?:ly)?[\s-]*divergen(?:t|ce)\b(?!\s+(?:is|was|normal))|\bnormo[\s-]*divergent\b/gi, 'normodivergent'],
+    [/\bhyper[\s-]*divergent\b/gi, 'hyperdivergent'], [/\bhypo[\s-]*divergent\b/gi, 'hypodivergent'],
+    // "Class I angle and canine" / "angle and canine Class I" -> both fields
+    [/\b(?:cl(?:ass)?\.?\s+)(1|2|3|one|two|three|won|to|too|i{1,3})((?:\s+div(?:ision)?\.?\s+(?:1|2|one|two|to))?)(?:\s+(?:bilaterally|bilateral))?\s+(?:for\s+|on\s+|in\s+)?(?:both\s+)?(?:the\s+)?(?:angle|molar)s?(?:\s+class)?\s+(?:and\s+|&\s+|n\s+)?(?:the\s+)?canines?(?:\s+class(?:es)?)?\b/gi,
+      (m, n, d) => 'angle class ' + n + d + ' canine class ' + n + d],
+    [/\b(?:angle|molar)(?:\s+class)?\s+(?:and\s+|&\s+|n\s+)?canines?(?:\s+class(?:es)?)?\s+(?:(?:are|is|both|were|was)\s+)*(?:cl(?:ass)?\.?\s+)?(1|2|3|one|two|three|won|to|too|i{1,3})\b((?:\s+div(?:ision)?\.?\s+(?:1|2|one|two|to))?)/gi,
+      (m, n, d) => 'angle class ' + n + d + ' canine class ' + n + d],
+    [/\b(upper|lower|maxillary|mandibular)\s+(?:mid\s*-?\s*lines?|midland|mid\s+land|middle\s+line|mid\s+lane)\b/gi, '$1 midline'],
+    [/\bmidline\s*'s\b/gi, 'midline is'],
+    [/\bo\.\s?h\.?(?=\s|$|,)/gi, 'OH'],
+    // newer mishearings
+    [/\b(?:and|in|an|end|n)\s+on\s+(?=(?:class|cl\.?)\s)/gi, 'end on '],
+    [/\b(?:crust|crossed|cross|crust\s+)\s*bites\b/gi, 'crossbites'], [/\b(?:crust|crossed)\s*bite\b/gi, 'crossbite'],
+    [/\bmatching\s+(?:midlines?|mid\s*lands?|midland)\b/gi, 'midlines are on'],
+    [/\b(?:midlines?|mid\s*lands?)\s+(?:are\s+)?match(?:ing)?\b/gi, 'midlines are on'],
+    [/\bautomotive\b/gi, 'curve of spee'],
+    // (value-before-name rules are added below: see SWAP_RULES)
+    [/\b(?:or|oral|our)\s+hygienist\b/gi, 'oral hygiene is'],
+    [/\b(oral hygiene(?:\s+is)?)\s+guide\b/gi, '$1 good'],
+    [/\bsafe\s+(?=(?:has|is|was|have)\s+(?:improved|better|worse|good|fine)|improved\b)/gi, 'sleep '],
+    [/\bwith\s+consider\b/gi, "we'll consider"],
+    [/\b(no|a|the|take|took|taking|any)\s+(?:step|steph|stef|steps)\b(?=\s+(?:was|taken|so|yet|today|done)|\s*$|[,.])/gi, '$1 ceph'],
+    [/\b(?:l\s?h\s?a|lha|lla)\b/gi, 'LLHA'],
+    // records & findings
+    [/\b(take|took|taking|have|no|the|a|any)\s+(?:self|chef|sef|cef|seth)\b/gi, '$1 ceph'],
+    [/\b(on|in|the)\s+panel\b/gi, '$1 pano'],
+    [/\b(?:android\s+services?|and\s?roid\s+services?|antral\s+pseudo[\s-]*cysts?|and\s+trial\s+pseudo[\s-]*cysts?|antral\s+pseudocysts?)\b/gi, 'antral pseudocyst'],
+    [/\bradio\s+opacit(y|ies)\b/gi, 'radiopacit$1'], [/\bradio\s+lucenc(y|ies)\b/gi, 'radiolucenc$1'],
+    [/\boral(?:\s+and)?\s+(?:the\s+)?(?:more\s+action|max(?:illo)?\s*-?\s*facial|maxillofacial|max\s+fax|maxi\s+facial)(?:\s+surgery)?\b/gi, 'oral and maxillofacial surgery'],
+    // Israeli health fund
+    [/\b(?:coupon|kupa|kupah|kuppa|koopa|kupat\s+(?:holim|cholim)|kupat)\b/gi, 'kuppah'],
+    // treatment wording
+    [/\bopera\s+braces\b/gi, 'upper braces'], [/\b(?:a\s+)?father\s+by\b/gi, 'followed by'],
+    [/\bby\s+the(?=\s+(?:upper|lower|u|l)\s*(?:and|\d|one|two|three|four|five|six|seven|eight))/gi, 'bond'],
+  ];
+
+  /* "2 mm overjet" / "deep overbite, normal overjet" -> name first, but only when the value after the
+     name is missing, so "overbite severe, overjet severe" is left alone */
+  const SW_LAB = '(?:overbite|overjet|over bite|over jet|over by|ob|oj|curve of spee)';
+  const SW_NEXT = '(?:overbite|overjet|over bite|over jet|over by|ob|oj|crossbites?|cross bites?|curve of spee|upper|lower|maxillary|mandibular|midlines?|no|missing|impacted|oral hygiene|oh|treatment|next visit|dentition|angle|canine|class|skeletal|transverse|divergence|(?:mild|moderate|severe|slight)\\s+(?:maxillary|mandibular|upper|lower|spacing|crowding|max\\w*|mand\\w*))';
+  const SW_DESC = '(?:normal|deep|severe|minimal|increased|insufficient|excessive|reduced|decreased|mild|moderate|ideal|negative|open|edge to edge|deep impinging)';
+  const SW_NUM = '(?:(?:\\d+(?:\\.\\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|half(?:\\s+a)?)\\s*(?:mm|millimeters?|millimetres?|%|percent))';
+  const SW_AFTER = '(?=\\s*(?:$|[,.;]|(?:and\\s+)?' + SW_NEXT + '\\b|(?:and\\s+)?(?:' + SW_DESC + '|' + SW_NUM + ')\\s+(?:of\\s+)?' + SW_LAB + '\\b))';
+  const SW_PREV = '(^|[,.;]\\s*|\\b(?:normal|none|on|good|fair|I{1,3}|sides?|mm|%|\\d|' + SW_DESC.slice(3, -1) + ')\\s+)';
+  const SWAP_RULES = [
+    [new RegExp('\\b(' + SW_NUM + ')\\s+(?:of\\s+)?(?:an?\\s+)?(' + SW_LAB + ')\\b' + SW_AFTER, 'gi'), '$2 $1,'],
+    [new RegExp(SW_PREV + '(' + SW_DESC + ')\\s+(' + SW_LAB + ')\\b' + SW_AFTER, 'gi'), '$1$3 $2,']
+  ];
+  function preFix(s, custom) {
+    for (const [from, to] of custom || []) if (from) s = s.replace(new RegExp('\\b' + escapeRe(from) + '\\b', 'gi'), to);
+    for (const [re, rep] of PRE_FIX) s = s.replace(re, rep);
+    for (let i = 0; i < 3; i++) for (const [re, rep] of SWAP_RULES) s = s.replace(re, rep);
+    return s;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* AUTO-PLACEMENT — put recognisable findings in their own field        */
+  /* ------------------------------------------------------------------ */
+  const cap = t => t ? t.charAt(0).toUpperCase() + t.slice(1) : t;
+  const CLASS_KEYS = ['skel', 'angle', 'canine'];
+  const ANCHORS = [
+    { key: 'skel', re: /(?:\b(?:I\s+)?(?:did not|didn't|do not|don't|have not|haven't|did n't)\s+(?:take|took|have|get)\s+(?:a\s+)?ceph\b|\bno ceph\b)(?:\s+(?:was\s+)?(?:taken|done|yet))?(?:\s*,?\s*so\s+(?:I\s+)?(?:no|couldn't check|could not check|can't (?:tell|check)|couldn't tell))?/gi,
+      val: (m, rest) => ({ text: 'No ceph', rest }) },
+    { key: 'sleep', re: /\b(?:(?:a\s+)?history of\s+)?(?:sleep apnea|snoring|snores|mouth breathing|adenoids?|tonsils?|OSA)\b|\bhistory of sleep\b/gi },
+    { key: '@arch2', late: true, re: /\b(?:(mild(?:ly)?|slight(?:ly)?|moderate(?:ly)?|severe(?:ly)?|minimal)\s+)?(spacing|crowding)\b/gi },
+    { key: 'trans', re: /\b(?:narrow|constricted|wide|broad)\s+(?:maxilla|upper arch|palate)\b|\bmaxillary constriction\b|\btransverse deficiency\b/gi },
+    { key: 'div', re: /\b(?:normo|hyper|hypo)divergent\b/gi },
+    { key: 'dentition', re: /\b(early mixed|late mixed|permanent|mixed|primary|adult)\s+dentition\b/gi,
+      val: (m, rest) => {
+        let r = rest.replace(/^[,:;\s]*(?:(?:pt|patient)\s+)?(?:is|has|with)?[,:\s]*/i, '').replace(/[,;]\s*$/, '');
+        // a plain list of teeth ("URC/E ULC and LEs") gets commas; a sentence is left alone
+        if (!r.replace(/\b(?:[UL][RL]?[A-E1-8](?:\/[A-E])?s?|[UL]?C-Es|and)\b|[,\s]/g, '')) r = r.replace(/,?\s+(?:and\s+)?(?=(?:[UL][RL][A-E1-8]|[UL][A-E]s|[UL]C-Es)\b)/g, ', ');
+        return cap(m[1].toLowerCase()) + (r ? ' (' + r + ')' : '');
+      } },
+    { key: '@class', re: /\b(?:(?:end[- ]on|(?:1\/2|1\/4|3\/4|full)\s+cusp)\s+)?Class\s+I{1,3}\b(?:\s+div\s+[12])?(?!\s+elastics)/g },
+    { key: '@midlines', re: /\b(?:(?:both|the|both the)\s+)?midlines\s+(?:are\s+)?(on|centered|coincident)\b/gi },
+    { key: 'max', re: /\b(?:(mild(?:ly)?|slight(?:ly)?|moderate(?:ly)?|severe(?:ly)?|minimal)\s+)?(?:maxillary|upper)\s+(spacing|crowding)\b/gi,
+      val: (m, rest) => [m[1], m[2]].filter(Boolean).join(' ') + (rest ? ' ' + rest : '') },
+    { key: 'mand', re: /\b(?:(mild(?:ly)?|slight(?:ly)?|moderate(?:ly)?|severe(?:ly)?|minimal)\s+)?(?:mandibular|lower)\s+(spacing|crowding)\b/gi,
+      val: (m, rest) => [m[1], m[2]].filter(Boolean).join(' ') + (rest ? ' ' + rest : '') },
+    { key: 'dentist', only: ['ldv', 'cc'], re: /\b(?:with|by|from|at)\s+(?=(?:Dr\.|a kuppah|kuppah|the kuppah|(?:his|her|their) (?:dentist|kuppah)))/gi,
+      val: (m, rest) => (/^at/i.test(m[0]) ? 'at ' : '') + rest }
+  ];
+
+  // values that end a short field; anything after them goes to the next field
+  const CLASS_GRAMMAR = /^((?:(?:(?:1\/2|1\/4|3\/4|full)\s+cusp|end[- ]on)\s+)?(?:Class\s+)?(?:I{1,3}|end[- ]on)(?:\s+div\s+[12])?(?:\s*,?\s*(?:and\s+)?(?:bilaterally|bilateral|on\s+(?:the\s+)?(?:right|left|R|L)(?:\s+side)?|(?:on\s+)?both\s+sides|(?:on\s+the\s+)?(?:right|left)\s+side|(?:1\/2|1\/4|3\/4|full)\s+cusp(?:\s+Class\s+I{1,3})?|Class\s+I{1,3}(?:\s+div\s+[12])?\s+on\s+the\s+(?:right|left)))*)(?=\s|$|[,.;])[\s,.;]*(.*)$/i;
+  const TX_GRAMMAR = /^((?:(?:extended|limited|comprehensive|full|interceptive|early)\s+)?(?:Ph\s+II?(?:\s+(?:and|&|\+)\s+Ph\s+II)?|comprehensive tx|limited tx|comprehensive|limited|recall|observation|observe|space maintenance|retreat(?:ment)?(?:\s+or\s+retention)?|retention|retainers only|no tx|none|monitor)(?:\s+tx)?)\b[\s,.;]*(.*)$/i;
+  const DURATION = /[,;]?\s*(?:(?:and\s+)?(?:all\s+)?(?:the\s+)?(?:whole\s+|entire\s+|total\s+|overall\s+)?(?:tx|txs|treatments?|it|this)\s+(?:will\s+|should\s+|would\s+)?(?:probably\s+)?(?:take|takes|last|lasts)\s+(?:about\s+|approximately\s+|around\s+|roughly\s+)?|(?:for\s+)?(?:about|approximately|approx\.?|around|roughly)\s+)(\d+(?:-\d+)?\s*(?:mo|yrs?))\b/gi;
+
+  function cleanPiece(t) {
+    if (/^\s*(?:the|a|an|and|or|of|so|um+|uh+|is|are|was)\s*[,.]?\s*$/i.test(t || '')) return '';
+    t = (t || '').replace(/^(?:[\s,;:]|\.(?!\d))+/, '').replace(/^(?:and|or|so|um+|uh+)\b[\s,]*/i, '');
+    let prev;
+    do { prev = t; t = t.replace(/[\s,;:]+$/, '').replace(/\s+(?:and|or|of|the|a|an|um+|uh+|so|with|is|are)$/i, ''); } while (t !== prev);
+    return t.trim();
+  }
+  const PROSE = ['cc', 'txp', 'notes', 'next', 'instr'];
+  function appendValue(st, key, text, cfg, newPhrase) {
+    if (!text) return;
+    let prev = st.values[key] || '';
+    let t = text;
+    if (prev && newPhrase && PROSE.includes(key) && !/[.!?;:\n]$/.test(prev.trim())) { st.values[key] = prev = prev.replace(/\s+$/, '') + '.'; }
+    if (!prev || /\n$/.test(prev) || (newPhrase && PROSE.includes(key) && /[.!?]$/.test(prev.trim()))) t = cap(t);
+    if (!prev) st.values[key] = t;
+    else if (/\n$/.test(prev) || /^[.,;:)]/.test(t)) st.values[key] = prev + t;
+    else st.values[key] = prev + ((cfg && cfg.commaJoin) && !/[.,;:]$/.test(prev) ? ', ' : ' ') + t;
+  }
+
+  /* Pure: apply one recognised phrase to the note state {values, active, history, justLabeled} */
+  function applySegment(raw, tpl, compiled, st, cfg) {
+    cfg = cfg || {};
+    const effects = [];
+    const keys = tpl.fields.map(f => f.key);
+    const has = k => keys.includes(k);
+    const fieldOf = k => tpl.fields.find(f => f.key === k);
+    const empty = k => !(st.values[k] || '').trim();
+    const before = { values: Object.assign({}, st.values), active: st.active };
+    let changed = false;
+    const touched = new Set();
+
+    function place(key, text, depth) {
+      depth = depth || 0;
+      const f = fieldOf(key);
+      text = cleanPiece(text);
+      if (!f || !text) return;
+      text = postField(f, text);
+      let rest = '', restKey = null;
+      if (f.roman && empty(key) && depth < 6) {
+        const g = text.match(CLASS_GRAMMAR);
+        if (g && g[2]) { text = g[1]; rest = g[2]; restKey = keys[keys.indexOf(key) + 1]; }
+      }
+      if ((key === 'tx' || key === 'txp') && has('time')) {
+        text = text.replace(DURATION, (m, d) => {
+          if (empty('time')) { appendValue(st, 'time', d, cfg); return ''; }
+          return st.values.time.replace(/\s/g, '') === d.replace(/\s/g, '') ? '' : m;
+        });
+        text = cleanPiece(text);
+      }
+      if (key === 'tx' && has('txp')) {
+        const g = text.match(TX_GRAMMAR);
+        if (g) { text = g[1]; if (g[2]) { rest = g[2]; restKey = 'txp'; } }
+        else if (empty('tx') && text.split(/\s+/).length > 5) { restKey = 'txp'; rest = text; text = ''; }
+      }
+      if (text) { appendValue(st, key, text, cfg, !touched.has(key)); touched.add(key); st.active = key; }
+      if (rest) {
+        if (restKey && has(restKey) && (empty(restKey) || restKey === 'txp')) place(restKey, rest, depth + 1);
+        else if (text) appendValue(st, key, cleanPiece(rest), cfg);
+        else place(key, rest, depth + 1);
+      }
+    }
+
+    function placeWithAnchors(text) {
+      const curIdx = keys.indexOf(st.active);
+      const examPhase = has('tx') && curIdx < keys.indexOf('tx');
+      const hits = [];
+      if (examPhase) {
+        for (const a of ANCHORS) {
+          if (a.only && !a.only.includes(st.active)) continue;
+          if (a.key[0] !== '@' && !has(a.key)) continue;
+          if (a.late && !(has('dentition') && curIdx >= keys.indexOf('dentition'))) continue;
+          a.re.lastIndex = 0;
+          let m;
+          while ((m = a.re.exec(text))) { hits.push({ a, m, idx: m.index, end: m.index + m[0].length }); if (!a.re.global) break; }
+        }
+      }
+      hits.sort((x, y) => x.idx - y.idx);
+      const kept = [];
+      for (const h of hits) if (!kept.length || h.idx >= kept[kept.length - 1].end) kept.push(h);
+      if (!kept.length) return place(st.active, text);
+      if (kept[0].idx > 0) place(st.active, text.slice(0, kept[0].idx));
+      kept.forEach((h, i) => {
+        const pieceEnd = i + 1 < kept.length ? kept[i + 1].idx : text.length;
+        const restTxt = cleanPiece(text.slice(h.end, pieceEnd));
+        const whole = text.slice(h.idx, pieceEnd);
+        if (h.a.key === '@class') {
+          let target = null;
+          if (CLASS_KEYS.includes(st.active) && empty(st.active)) target = st.active;
+          else target = (st.active === 'skel' ? CLASS_KEYS : ['angle', 'canine']).find(k => has(k) && empty(k)) || null;
+          return place(target || st.active, whole);
+        }
+        if (h.a.key === '@arch2') {
+          const v = [h.m[1] && h.m[1].replace(/ly$/i, ''), h.m[2]].filter(Boolean).join(' ') + (restTxt ? ' ' + restTxt : '');
+          const target = ['max', 'mand'].find(k => has(k) && empty(k));
+          return place(target || st.active, target ? v : whole);
+        }
+        if (h.a.key === '@midlines') {
+          if (!has('umid') || !has('lmid')) return place(st.active, whole);
+          const v = cap(h.m[1].toLowerCase());
+          if (empty('umid')) place('umid', v);
+          if (empty('lmid')) place('lmid', v);
+          if (restTxt) place('lmid', restTxt);
+          return;
+        }
+        if (!empty(h.a.key) && h.a.key !== st.active) return place(st.active, whole);
+        const v = h.a.val ? h.a.val(h.m, restTxt) : whole;
+        if (v && typeof v === 'object') {
+          place(h.a.key, v.text);
+          if (v.rest) { const nk = keys.slice(keys.indexOf(h.a.key) + 1).find(k => empty(k)); place(nk || h.a.key, v.rest); }
+        } else place(h.a.key, v);
+      });
+    }
+
+    const actions = routeSegment(raw, compiled, { midSentence: cfg.midSentence, activeKey: st.active, justLabeled: st.justLabeled, custom: cfg.custom });
+    for (const a of actions) {
+      if (a.type === 'field') {
+        let k = a.key;
+        if (a.fill) k = a.fill.find(x => has(x) && empty(x)) || a.fill[a.fill.length - 1];
+        st.active = k; st.justLabeled = true;
+      } else if (a.type === 'next' || a.type === 'prev') {
+        const i = Math.max(0, Math.min(keys.length - 1, keys.indexOf(st.active) + (a.type === 'next' ? 1 : -1)));
+        st.active = keys[i]; st.justLabeled = false;
+      } else if (a.type === 'undo') {
+        const h = st.history.pop();
+        if (h) { st.values = h.values; st.active = h.active; }
+        effects.push('undo');
+      } else if (a.type === 'clear') {
+        st.history.push({ values: Object.assign({}, st.values), active: st.active });
+        st.values[st.active] = '';
+      } else if (a.type === 'text') {
+        const n = normalize(a.text, cfg.custom);
+        if (!n) continue;
+        placeWithAnchors(n);
+        st.justLabeled = false; changed = true;
+      } else effects.push(a.type);
+    }
+    if (changed) st.history.push(before);
+    return effects;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* AI TIDY-UP                                                           */
+  /* ------------------------------------------------------------------ */
+  const AI_PROMPT = [
+    'You are tidying an orthodontic clinical note that was dictated with speech recognition.',
+    'Rules:',
+    '- Keep every line label exactly as written, in the same order, one label per line ("Label: text"). Keep empty labels empty.',
+    '- Fix obvious speech-recognition mistakes and spelling using orthodontic context (e.g. ceph, pano, kuppah, NiTi, Palmer notation such as UR2, URC, LLE, U6-6).',
+    '- Turn run-on free text (especially TxP) into short, clear clinical sentences.',
+    '- Use the abbreviations already used in the note (pt, tx, Ph I, Ph II, mm, mo, wks, NV, BB).',
+    '- Do NOT add, remove or change any clinical finding, tooth, measurement, appliance, material, time or plan. Do not invent anything.',
+    '- If something is unclear, keep the original words and put [?] after them.',
+    '- Reply with the note only: no explanations, no markdown, no bullet points.'
+  ].join('\n');
+
+  /* Read a "Label: text" note back into field values. Returns {values, found}. */
+  function parseNote(tpl, text) {
+    const lines = String(text || '').replace(/\r/g, '').replace(/\*\*/g, '').replace(/^```\w*|```$/gm, '').split('\n');
+    const labeled = [];
+    tpl.fields.filter(f => f.label).forEach(f => [f.label].concat(f.short && f.short !== f.label ? [f.short] : [], f.alt || []).forEach(L => labeled.push({ f, L })));
+    labeled.forEach(o => Object.assign(o, mk(o.f, o.L)));
+    labeled.sort((a, b) => b.L.length - a.L.length);
+    function mk(f, L) { return ({
+      re: new RegExp('^\\s*(?:[-•*]\\s*)?' + escapeRe(L) + (f.sep === ' ' ? '(?:\\s*:)?\\s+' : '\\s*:\\s*') + '(.*)$', 'i'),
+      reEmpty: new RegExp('^\\s*(?:[-•*]\\s*)?' + escapeRe(L) + '\\s*:?\\s*$', 'i')
+    }); }
+    const out = {};
+    const free = tpl.fields.find(f => !f.label);
+    let cur = free ? free.key : null, found = 0;
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const cands = labeled.filter(l => l.re.test(line) || l.reEmpty.test(line));
+      if (cands.length) {
+        const pick = cands.find(c => !(c.f.key in out)) || cands[cands.length - 1];
+        const m = line.match(pick.re);
+        cur = pick.f.key; out[cur] = m ? m[1].trim() : ''; found++;
+        continue;
+      }
+      if (cur) out[cur] = (out[cur] ? out[cur] + '\n' : '') + line.trim();
+    }
+    return { values: out, found };
+  }
+
+  /* Build the final note text */
+  function buildNote(tpl, values, includeEmpty, shortLabels) {
+    const lines = [];
+    tpl.fields.forEach(f => {
+      const v = (values[f.key] || '').trim();
+      if (!v && (f.optional || !includeEmpty)) return;
+ if (!f.label) { if (v) lines.push(v); return; }
+      const sep = f.sep !== undefined ? f.sep : ': ';
+      lines.push(((shortLabels && f.short) || f.label) + (v ? sep + v : (sep.trim() ? sep.trim() : '')));
+    });
+    return lines.join('\n');
+  }
+
+  /* Phrases to bias on-device recognition (when the browser supports it) */
+  const BIAS_PHRASES = ['NiTi', 'nickel titanium', 'stainless steel', 'TMA', 'sixteen by twenty-two', 'nineteen by twenty-five',
+    'seventeen by twenty-five', 'power chain', 'open coil', 'closed coil', 'elastics', 'Class two elastics', 'box elastics',
+    'triangle elastics', 'RPE', 'turns', 'separators', 'Herbst', 'Forsus', 'Nance', 'TPA', 'lower lingual holding arch',
+    'Hawley', 'Essix', 'debond', 'bracket', 'broken bracket', 'overjet', 'overbite', 'crossbite', 'curve of Spee', 'midline',
+    'upper right', 'upper left', 'lower right', 'lower left', 'canine class', 'skeletal class', 'divergence', 'transverse',
+    'hyperdivergent', 'hypodivergent', 'dentition', 'mixed dentition', 'TMJ', 'IPR', 'TADs', 'ceph', 'pano', 'IO scan',
+    'Ketac', 'Band-Lok', 'Transbond', 'chief complaint', 'last dental visit', 'phase one', 'phase two', 'next visit'];
+
+  /* ------------------------------------------------------------------ */
+  /* UI                                                                   */
+  /* ------------------------------------------------------------------ */
+  const CSS = `
+  :host{all:initial}
+  *{box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  .od{background:#fff;color:#1d2a33;border:1px solid #cfdbe2;border-radius:12px;box-shadow:0 10px 30px rgba(20,40,60,.18);display:flex;flex-direction:column;overflow:hidden;font-size:13px;height:100%}
+  .hd{background:#0f5c6e;color:#fff;padding:8px 10px;display:flex;align-items:center;gap:8px;cursor:move;user-select:none}
+  .hd b{font-size:14px;flex:1}
+  .hd button{background:transparent;border:0;color:#fff;font-size:16px;cursor:pointer;padding:2px 6px;border-radius:6px}
+  .hd button:hover{background:rgba(255,255,255,.15)}
+  .tabs{display:flex;flex-wrap:wrap;gap:4px;padding:8px 10px;border-bottom:1px solid #e3ebef;background:#f5f9fb}
+  .tabs button{border:1px solid #c6d6de;background:#fff;color:#0f5c6e;border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer}
+  .tabs button.on{background:#0f5c6e;color:#fff;border-color:#0f5c6e}
+  .bar{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid #e3ebef}
+  .mic{width:44px;height:44px;border-radius:50%;border:0;background:#0f5c6e;color:#fff;font-size:20px;cursor:pointer;flex:none}
+  .mic.live{background:#d23c3c;animation:pulse 1.4s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(210,60,60,.5)}70%{box-shadow:0 0 0 10px rgba(210,60,60,0)}100%{box-shadow:0 0 0 0 rgba(210,60,60,0)}}
+  .st{flex:1;min-width:0}
+  .st .s1{font-weight:600}
+  .st .s2{color:#6a7d88;font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .body{flex:1;overflow:auto;padding:6px 10px}
+  .f{display:flex;gap:8px;align-items:flex-start;padding:3px 4px;border-radius:8px;border:1px solid transparent}
+  .f.on{background:#e8f5f7;border-color:#7fc0cd}
+  .f label{flex:none;width:104px;padding-top:6px;font-weight:600;color:#0f5c6e;cursor:pointer;font-size:12px}
+  .f label small{display:block;font-weight:400;color:#8a9aa3;font-size:10px}
+  .f textarea{flex:1;resize:none;border:1px solid #d4e0e6;border-radius:6px;padding:5px 7px;font-size:13px;min-height:28px;line-height:1.35;color:#1d2a33;background:#fff}
+  .f textarea:focus{outline:2px solid #7fc0cd;border-color:#7fc0cd}
+  .out{border-top:1px solid #e3ebef;padding:8px 10px;background:#f5f9fb}
+  .out pre{margin:0 0 8px;max-height:150px;overflow:auto;background:#fff;border:1px solid #d4e0e6;border-radius:6px;padding:7px;white-space:pre-wrap;font-family:ui-monospace,Consolas,monospace;font-size:12px;color:#1d2a33}
+  .btns{display:flex;flex-wrap:wrap;gap:6px}
+  .btns.ai{margin-top:6px}
+  .btns.ai button{border-color:#7a5bb5;color:#5b3f96}
+  .paste{margin-top:8px}
+  .paste textarea{width:100%;min-height:120px;border:1px solid #b9a6dd;border-radius:6px;padding:6px;font-family:ui-monospace,Consolas,monospace;font-size:12px}
+  .btns button{border:1px solid #0f5c6e;background:#fff;color:#0f5c6e;border-radius:7px;padding:6px 10px;font-size:12px;cursor:pointer;font-weight:600}
+  .btns button.pri{background:#0f5c6e;color:#fff}
+  .btns button:hover{filter:brightness(.95)}
+  .toast{color:#1d7a43;font-size:12px;margin-top:6px;min-height:15px}
+  .set{padding:10px;overflow:auto;flex:1;display:none}
+  .set.show{display:block}
+  .set h4{margin:12px 0 4px;color:#0f5c6e;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+  .set label{display:flex;gap:6px;align-items:center;margin:4px 0}
+  .set textarea{width:100%;min-height:110px;font-family:ui-monospace,Consolas,monospace;font-size:12px;border:1px solid #d4e0e6;border-radius:6px;padding:6px}
+  .set select{padding:4px;border-radius:6px;border:1px solid #c6d6de}
+  .help{color:#55707d;font-size:12px;line-height:1.45}
+  .help code{background:#eef4f7;padding:0 4px;border-radius:4px}
+  .hide{display:none!important}
+  `;
+
+  const DEFAULT_CUSTOM = [
+    '# heard => write   (one per line; edit freely)',
+    'nighty => NiTi',
+    '# power chain => PC',
+    '# open coil spring => OCS',
+    '# remove the # at the start of a line to turn it on'
+  ].join('\n');
+
+  function loadSettings() {
+    const d = { lang: 'en-US', shortLabels: false, midSentence: true, includeEmpty: true, commaJoin: false, onDevice: false, custom: DEFAULT_CUSTOM, templatesJSON: '' };
+    try { return Object.assign(d, JSON.parse(localStorage.getItem('orthoDictate.settings') || '{}')); } catch (e) { return d; }
+  }
+  function saveSettings(s) { try { localStorage.setItem('orthoDictate.settings', JSON.stringify(s)); } catch (e) {} }
+
+  function mount(host, opts) {
+    opts = opts || {};
+    const mode = opts.mode || 'standalone';
+    const root = host.attachShadow ? host.attachShadow({ mode: 'open' }) : host;
+    const settings = loadSettings();
+    let templates = DEFAULT_TEMPLATES;
+    if (settings.templatesJSON) { try { templates = JSON.parse(settings.templatesJSON); } catch (e) { templates = DEFAULT_TEMPLATES; } }
+
+    const state = { tpl: null, compiled: null, values: {}, active: null, history: [], want: false, rec: null };
+
+    root.innerHTML = `<style>${CSS}</style>
+    <div class="od">
+      <div class="hd" data-drag><b>🦷 Ortho Dictate <small style="font-weight:400;opacity:.75">v${VERSION}</small></b>
+        <button data-act="settings" title="Settings & help">⚙</button>
+        ${mode === 'userscript' ? '<button data-act="min" title="Hide (Alt+O)">–</button>' : ''}
+      </div>
+      <div class="main">
+        <div class="tabs"></div>
+        <div class="bar">
+          <button class="mic" data-act="mic" title="Start/stop dictation (Alt+D)">🎙</button>
+          <div class="st"><div class="s1">Ready</div><div class="s2">Pick a template, click Mic, say a field name, then dictate.</div></div>
+        </div>
+      </div>
+      <div class="body main"></div>
+      <div class="out main">
+        <pre class="note"></pre>
+        <div class="btns">
+          ${mode === 'userscript' ? '<button class="pri" data-act="insert" title="Alt+I">⤵ Insert into Smilecloud</button>' : ''}
+          <button class="${mode === 'userscript' ? '' : 'pri'}" data-act="copy" title="Alt+C">📋 Copy note</button>
+          <button data-act="save">💾 Save .txt</button>
+          <button data-act="new">✚ New note</button>
+        </div>
+        <div class="btns ai">
+          <button data-act="tidy" class="hide" title="Uses the AI built into Chrome on this computer — nothing is sent anywhere">✨ Tidy up (on this computer)</button>
+          <button data-act="aicopy" title="Copies the note with instructions; paste into Claude.ai or another AI chat">🤖 Copy for AI</button>
+          <button data-act="aipaste" title="Bring the AI's cleaned-up note back into the fields">📥 Paste AI result</button>
+          <button data-act="undo" title="Undo the last dictated phrase or AI tidy-up">↶ Undo</button>
+        </div>
+        <div class="paste hide">
+          <textarea placeholder="Paste the AI's answer here (Ctrl+V)"></textarea>
+          <div class="btns"><button class="pri" data-act="aiapply">Apply to note</button><button data-act="aicancel">Cancel</button></div>
+        </div>
+        <div class="toast"></div>
+      </div>
+      <div class="set"></div>
+    </div>`;
+
+    const $ = sel => root.querySelector(sel);
+    const tabsEl = $('.tabs'), bodyEl = $('.body'), noteEl = $('.note'), toastEl = $('.toast');
+    const s1 = $('.s1'), s2 = $('.s2'), micBtn = $('.mic'), setEl = $('.set');
+
+    function toast(msg, bad) { toastEl.textContent = msg; toastEl.style.color = bad ? '#b23030' : '#1d7a43'; clearTimeout(toast.t); toast.t = setTimeout(() => (toastEl.textContent = ''), 5000); }
+
+    function renderTabs() {
+      tabsEl.innerHTML = templates.map(t => `<button data-tpl="${t.id}" class="${state.tpl && state.tpl.id === t.id ? 'on' : ''}">${t.name}</button>`).join('');
+    }
+    function selectTemplate(id, keepValues) {
+      const t = templates.find(x => x.id === id) || templates[0];
+      state.tpl = t; state.compiled = compileTemplate(t);
+      if (!keepValues) {
+        state.values = {}; state.history = [];
+        t.fields.forEach(f => { if (f.def) state.values[f.key] = f.def; });
+      }
+      state.active = (t.fields.find(f => !f.def) || t.fields[0]).key;
+      renderTabs(); renderFields(); renderNote();
+    }
+    function renderFields() {
+      bodyEl.innerHTML = state.tpl.fields.map(f => `
+        <div class="f ${state.active === f.key ? 'on' : ''}" data-key="${f.key}">
+          <label data-key="${f.key}">${f.label || 'Text'}<small>say “${(f.aliases || [])[0] || ''}”</small></label>
+          <textarea data-key="${f.key}" rows="1"></textarea>
+        </div>`).join('');
+      bodyEl.querySelectorAll('textarea').forEach(ta => { ta.value = state.values[ta.dataset.key] || ''; autosize(ta); });
+    }
+    function autosize(ta) { ta.style.height = 'auto'; ta.style.height = Math.max(28, ta.scrollHeight + 2) + 'px'; }
+    function setActive(key) {
+      state.active = key;
+      bodyEl.querySelectorAll('.f').forEach(el => el.classList.toggle('on', el.dataset.key === key));
+      const el = bodyEl.querySelector(`.f[data-key="${key}"]`);
+      if (el) el.scrollIntoView({ block: 'nearest' });
+    }
+    function updateField(key) {
+      const ta = bodyEl.querySelector(`textarea[data-key="${key}"]`);
+      if (ta) { ta.value = state.values[key] || ''; autosize(ta); }
+      renderNote();
+    }
+    function renderNote() { noteEl.textContent = buildNote(state.tpl, state.values, settings.includeEmpty, settings.shortLabels); }
+    function noteText() { return buildNote(state.tpl, state.values, settings.includeEmpty, settings.shortLabels); }
+
+    function refreshAll() {
+      bodyEl.querySelectorAll('textarea[data-key]').forEach(ta => { ta.value = state.values[ta.dataset.key] || ''; autosize(ta); });
+      setActive(state.active); renderNote();
+    }
+    function handleSegment(raw) {
+      const custom = parseCustom(settings.custom).filter(p => !p[0].startsWith('#'));
+      const effects = applySegment(raw, state.tpl, state.compiled, state,
+        { midSentence: settings.midSentence, commaJoin: settings.commaJoin, custom });
+      refreshAll();
+      for (const e of effects) {
+        if (e === 'undo') toast('Removed last phrase');
+        else if (e === 'stop') stopListening();
+        else if (e === 'copy') doCopy();
+        else if (e === 'insert') doInsert();
+      }
+    }
+
+    /* ---- speech ---- */
+    const SR = global.SpeechRecognition || global.webkitSpeechRecognition;
+    function status(a, b) { s1.textContent = a; if (b !== undefined) s2.textContent = b; }
+    async function startListening() {
+      if (!SR) { status('Not supported', 'Use Google Chrome or Microsoft Edge for dictation.'); return; }
+      state.want = true;
+      if (settings.onDevice && SR.available) {
+        try {
+          const o = { langs: [settings.lang], processLocally: true };
+          const av = await SR.available(o);
+          if (av === 'downloadable' || av === 'downloading') { status('Downloading on-device model…', 'One-time download; keep this open.'); await SR.install(o); }
+          else if (av === 'unavailable') { toast('On-device speech not available for ' + settings.lang + ' — using standard recognition.', true); }
+        } catch (e) { /* fall back silently */ }
+      }
+      spawn();
+    }
+    function spawn() {
+      const rec = new SR();
+      rec.lang = settings.lang; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1;
+      if (settings.onDevice && 'processLocally' in rec) {
+        try { rec.processLocally = true; } catch (e) {}
+        if (global.SpeechRecognitionPhrase) { try { rec.phrases = BIAS_PHRASES.map(p => new global.SpeechRecognitionPhrase(p, 3.0)); } catch (e) {} }
+      }
+      rec.onstart = () => { micBtn.classList.add('live'); status('Listening…', 'Say a field name (e.g. “overjet”), then dictate. “Next” moves on.'); };
+      rec.onresult = e => {
+        let interim = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const r = e.results[i];
+          if (r.isFinal) handleSegment(r[0].transcript); else interim += r[0].transcript;
+        }
+        s2.textContent = interim ? '… ' + interim : 'Listening…';
+      };
+      rec.onerror = e => {
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { state.want = false; status('Microphone blocked', 'Allow microphone access for this site (lock icon in address bar).'); }
+        else if (e.error === 'language-not-supported' && settings.onDevice) { settings.onDevice = false; saveSettings(settings); toast('On-device model not available; switched to standard recognition.', true); }
+        else if (e.error === 'network') status('Network error', 'Standard recognition needs internet. Retrying…');
+        else if (e.error !== 'no-speech' && e.error !== 'aborted') status('Error: ' + e.error);
+      };
+      rec.onend = () => {
+        if (state.want) setTimeout(() => { if (state.want) try { spawn(); } catch (e) {} }, 250);
+        else { micBtn.classList.remove('live'); status('Stopped', 'Click the mic (or Alt+D) to continue.'); }
+      };
+      state.rec = rec;
+      try { rec.start(); } catch (e) { status('Could not start', String(e.message || e)); }
+    }
+    function stopListening() { state.want = false; if (state.rec) try { state.rec.stop(); } catch (e) {} micBtn.classList.remove('live'); status('Stopped', 'Click the mic (or Alt+D) to continue.'); }
+    function toggleMic() { state.want ? stopListening() : startListening(); }
+
+    /* ---- output ---- */
+    async function copyText(t) {
+      try { await navigator.clipboard.writeText(t); return true; } catch (e) {
+        const ta = document.createElement('textarea'); ta.dataset.odTemp = '1'; ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select(); let ok = false; try { ok = document.execCommand('copy'); } catch (_) {}
+        ta.remove(); return ok;
+      }
+    }
+    async function doCopy() { const ok = await copyText(noteText()); toast(ok ? 'Note copied — paste with Ctrl+V' : 'Copy failed — select the preview text and copy manually', !ok); }
+    async function doInsert() {
+      const t = noteText();
+      if (!opts.insert) return doCopy();
+      const r = opts.insert(t);
+      await copyText(t);
+      if (r === true) toast('Inserted into note ✔ (also copied to clipboard)');
+      else toast(r || 'Click inside the Smilecloud note box first, then press Insert. (Note is on your clipboard — Ctrl+V works too.)', true);
+    }
+    /* ---- AI tidy-up ---- */
+    const pasteBox = $('.paste'), pasteTa = $('.paste textarea'), tidyBtn = $('[data-act="tidy"]');
+    const AI_OPTS = { expectedInputs: [{ type: 'text', languages: ['en'] }], expectedOutputs: [{ type: 'text', languages: ['en'] }] };
+    (async () => {
+      try {
+        if (!global.LanguageModel) return;
+        const a = await global.LanguageModel.availability(AI_OPTS);
+        if (a && a !== 'unavailable') tidyBtn.classList.remove('hide');
+      } catch (e) {}
+    })();
+    function applyTidied(text) {
+      const filled = state.tpl.fields.filter(f => (state.values[f.key] || '').trim()).length;
+      const { values, found } = parseNote(state.tpl, text);
+      if (!found || found < Math.ceil(filled * 0.5)) { toast('The AI answer didn\'t keep the note\'s labels, so nothing was changed.', true); return false; }
+      state.history.push({ values: Object.assign({}, state.values), active: state.active });
+      state.tpl.fields.forEach(f => { if (f.key in values) state.values[f.key] = values[f.key]; });
+      refreshAll();
+      toast('Tidied ✔ — please read it over. ↶ Undo goes back.');
+      return true;
+    }
+    async function doTidy() {
+      if (!global.LanguageModel) return;
+      tidyBtn.disabled = true; const label = tidyBtn.textContent; tidyBtn.textContent = '✨ Tidying…';
+      try {
+        const session = await global.LanguageModel.create(Object.assign({
+          initialPrompts: [{ role: 'system', content: AI_PROMPT }],
+          monitor(m) { m.addEventListener('downloadprogress', e => toast('Downloading Chrome\'s AI model (one time)… ' + Math.round((e.loaded || 0) * 100) + '%')); }
+        }, AI_OPTS));
+        const out = await session.prompt(noteText());
+        try { session.destroy(); } catch (e) {}
+        applyTidied(out);
+      } catch (e) {
+        toast('Chrome\'s built-in AI could not run here (' + (e.message || e) + '). Use 🤖 Copy for AI instead.', true);
+      } finally { tidyBtn.disabled = false; tidyBtn.textContent = label; }
+    }
+    async function doAiCopy() {
+      const ok = await copyText(AI_PROMPT + '\n\nNOTE:\n' + noteText());
+      toast(ok ? 'Copied. Paste it into Claude.ai (or another AI chat), copy its answer, then click 📥 Paste AI result.' : 'Copy failed', !ok);
+    }
+    async function doAiPaste() {
+      pasteBox.classList.remove('hide');
+      pasteTa.value = '';
+      try { const t = await navigator.clipboard.readText(); if (t && /:/.test(t)) pasteTa.value = t; } catch (e) {}
+      pasteTa.focus();
+    }
+    function doUndo() {
+      const h = state.history.pop();
+      if (!h) return toast('Nothing to undo', true);
+      state.values = h.values; state.active = h.active; refreshAll(); toast('Undone');
+    }
+
+    function doSave() {
+      const blob = new Blob([noteText()], { type: 'text/plain' });
+      const a = document.createElement('a');
+      const d = new Date();
+      a.href = URL.createObjectURL(blob);
+      a.download = `${state.tpl.name.replace(/\s+/g, '_')}_${d.toISOString().slice(0, 16).replace(/[:T]/g, '-')}.txt`;
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    }
+
+    /* ---- settings ---- */
+    function renderSettings() {
+      setEl.innerHTML = `
+        <h4>Recognition</h4>
+        <label>Language/accent <select data-s="lang">
+          ${[['en-US', 'English (US)'], ['en-GB', 'English (UK)'], ['en-CA', 'English (Canada)'], ['en-AU', 'English (Australia)'], ['en-ZA', 'English (S. Africa)'], ['en-IN', 'English (India)'], ['en-IL', 'English (Israel)']]
+            .map(([v, n]) => `<option value="${v}" ${settings.lang === v ? 'selected' : ''}>${n}</option>`).join('')}
+        </select></label>
+        <label><input type="checkbox" data-s="onDevice" ${settings.onDevice ? 'checked' : ''}> On-device recognition when available (audio stays on this computer; Chrome downloads a model once; best with English US)</label>
+        <label><input type="checkbox" data-s="midSentence" ${settings.midSentence ? 'checked' : ''}> Recognize field names without pausing, in any order (the note is always printed in template order)</label>
+        <label><input type="checkbox" data-s="commaJoin" ${settings.commaJoin ? 'checked' : ''}> Put a comma between phrases (each pause = new phrase)</label>
+        <h4>Note</h4>
+        <label><input type="checkbox" data-s="shortLabels" ${settings.shortLabels ? 'checked' : ''}> Short headings in the note (CC, LDV, OB, OJ, U Midline, OH, Tx, TxP, NV, E, BB, U, L)</label>
+        <label><input type="checkbox" data-s="includeEmpty" ${settings.includeEmpty ? 'checked' : ''}> Keep empty fields as blank labels (e.g. “Crossbite:”)</label>
+        <h4>Custom words  <span style="text-transform:none;font-weight:400">— <code>heard =&gt; write</code></span></h4>
+        <textarea data-s="custom">${escapeHtml(settings.custom)}</textarea>
+        <h4>Templates (advanced)</h4>
+        <div class="help">Edit labels, spoken names, or add a template. Leave blank to use the built-in set.</div>
+        <textarea data-s="templatesJSON" placeholder="(built-in templates)">${escapeHtml(settings.templatesJSON)}</textarea>
+        <div class="btns" style="margin-top:6px"><button data-act="loadtpl">Load built-in templates to edit</button><button data-act="resettpl">Reset templates</button></div>
+        <h4>Voice commands</h4>
+        <div class="help">
+          <b>Field name</b> at the start of a phrase jumps there (pause briefly first): “overjet … 3 millimeters”.<br>
+          <code>next</code> / <code>previous</code> · <code>scratch that</code> · <code>clear field</code> · <code>new line</code> · <code>period</code> · <code>comma</code> · <code>copy note</code> · <code>insert note</code> · <code>stop listening</code><br>
+          <b>Teeth:</b> “upper right two” → UR2 · “lower left primary second molar” → LLE · “upper six to six” → U6-6 · “upper and lower seven to seven” → U and L 7-7<br>
+          <b>Wires:</b> “sixteen by twenty-two NiTi” → .016x.022 NiTi · “oh one four nitinol” → .014 NiTi · “nineteen by twenty-five stainless” → .019x.025 SS<br>
+          <b>Elastics:</b> “class two elastics quarter inch three and a half ounce” → Class II elastics 1/4" 3.5 oz<br>
+          <b>Other:</b> “three millimeters” → 3mm · “fifty percent” → 50% · “six weeks” → 6 wks · “half cusp” → 1/2 cusp · “phase one” → Ph I<br>
+          <b>Shortcuts:</b> Alt+D mic · Alt+C copy ${mode === 'userscript' ? '· Alt+I insert · Alt+O show/hide' : ''}
+        </div>
+        <div class="btns" style="margin-top:10px"><button class="pri" data-act="settings">Done</button></div>`;
+    }
+    function escapeHtml(s) { return String(s || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+    function toggleSettings() {
+      const show = !setEl.classList.contains('show');
+      if (show) renderSettings();
+      else {
+        // apply template JSON if changed
+        let t = DEFAULT_TEMPLATES;
+        if (settings.templatesJSON.trim()) { try { t = JSON.parse(settings.templatesJSON); } catch (e) { toast('Template JSON has an error — using built-in templates', true); } }
+        templates = t; selectTemplate(state.tpl.id, true);
+      }
+      setEl.classList.toggle('show', show);
+      root.querySelectorAll('.main').forEach(el => el.classList.toggle('hide', show));
+    }
+
+    /* ---- events ---- */
+    root.addEventListener('click', e => {
+      const el = e.target.closest('[data-act],[data-tpl],label[data-key]');
+      if (!el) return;
+      if (el.dataset.tpl) {
+        const hasText = Object.entries(state.values).some(([k, v]) => v && !(state.tpl.fields.find(f => f.key === k) || {}).def);
+        if (hasText && !confirm('Switch template? The current note will be cleared (copy it first if needed).')) return;
+        return selectTemplate(el.dataset.tpl);
+      }
+      if (el.dataset.key) return setActive(el.dataset.key);
+      const act = el.dataset.act;
+      if (act === 'mic') toggleMic();
+      else if (act === 'copy') doCopy();
+      else if (act === 'insert') doInsert();
+      else if (act === 'save') doSave();
+      else if (act === 'tidy') doTidy();
+      else if (act === 'aicopy') doAiCopy();
+      else if (act === 'aipaste') doAiPaste();
+      else if (act === 'aiapply') { if (applyTidied(pasteTa.value)) pasteBox.classList.add('hide'); }
+      else if (act === 'aicancel') pasteBox.classList.add('hide');
+      else if (act === 'undo') doUndo();
+      else if (act === 'new') { if (confirm('Start a new note? Current text will be cleared.')) selectTemplate(state.tpl.id); }
+      else if (act === 'settings') toggleSettings();
+      else if (act === 'min' && opts.onMinimize) opts.onMinimize();
+      else if (act === 'loadtpl') { settings.templatesJSON = JSON.stringify(DEFAULT_TEMPLATES, null, 1); saveSettings(settings); renderSettings(); }
+      else if (act === 'resettpl') { settings.templatesJSON = ''; saveSettings(settings); renderSettings(); }
+    });
+    root.addEventListener('focusin', e => { const k = e.target.dataset && e.target.dataset.key; if (k && e.target.tagName === 'TEXTAREA') setActive(k); });
+    root.addEventListener('input', e => {
+      const t = e.target;
+      if (t.tagName === 'TEXTAREA' && t.dataset.key) { state.values[t.dataset.key] = t.value; autosize(t); renderNote(); }
+    });
+    root.addEventListener('change', e => {
+      const t = e.target, k = t.dataset && t.dataset.s;
+      if (!k) return;
+      settings[k] = t.type === 'checkbox' ? t.checked : t.value;
+      saveSettings(settings);
+      if (k === 'includeEmpty' || k === 'shortLabels') renderNote();
+      if ((k === 'lang' || k === 'onDevice') && state.want) { stopListening(); setTimeout(startListening, 300); }
+    });
+    global.addEventListener('keydown', e => {
+      if (!e.altKey || e.ctrlKey || e.metaKey) return;
+      const k = e.key.toLowerCase();
+      if (k === 'd') { e.preventDefault(); toggleMic(); }
+      else if (k === 'c') { e.preventDefault(); doCopy(); }
+      else if (k === 'i' && mode === 'userscript') { e.preventDefault(); doInsert(); }
+    }, true);
+
+    selectTemplate(templates[0].id);
+    return { root, toggleMic, getNote: noteText, selectTemplate };
+  }
+
+  global.OrthoDictate = { mount, normalize, postField, applySegment, preFix, parseNote, AI_PROMPT, routeSegment, compileTemplate, buildNote, DEFAULT_TEMPLATES, parseCustom };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+OrthoDictate.mount(document.getElementById('app'), { mode: 'standalone' });
+</script></body></html>
