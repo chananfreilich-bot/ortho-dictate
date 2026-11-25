@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ortho Dictate for Smilecloud
 // @namespace    ortho-dictate
-// @version      1.10
+// @version      1.11
 // @description  Orthodontic voice dictation with consult/adjustment/bonding/etc. templates; inserts the note into the Smilecloud notes box.
 // @include      /^https?:\/\/([^\/]*\.)?smilecloud[^\/]*\/.*$/
 // @include      /^https?:\/\/([^\/]*\.)?smile-cloud[^\/]*\/.*$/
@@ -23,7 +23,7 @@
   /* aliases: spoken names that jump to this field, def: default text,   */
   /* optional: only printed when filled                                   */
   /* ------------------------------------------------------------------ */
-  const VERSION = '1.10';
+  const VERSION = '1.11';
   const ARCH_GUARD = true; // marks aliases that must not fire when followed by right/left/and
   const NV = { key: 'nv', label: 'Next Visit', short: 'NV', aliases: ['next visit', 'next appointment', { say: 'nv', mid: true }, { say: 'n v', mid: true }] };
   const NOTES = { key: 'notes', label: 'Notes', aliases: ['notes', 'note', 'comments', 'other'], optional: true };
@@ -229,6 +229,19 @@
       .replace(new RegExp('\\b(?:up\\s*left|upleft|upper\\s+(?:lift|laughed|loft))\\b' + TT, 'gi'), 'upper left')
       .replace(new RegExp('\\b(?:low\\s*right|lower\\s+(?:write|rite|wright|righ))\\b' + TT, 'gi'), 'lower right')
       .replace(new RegExp('\\b(?:low\\s*left|lower\\s+(?:lift|laughed|loft))\\b' + TT, 'gi'), 'lower left');
+    // dotted quadrant letters: "L.L. 6" -> "LL 6"
+    s = s.replace(/\b([UL])\.\s?([RL])\.?(?=\s*(?:\d|[A-E]\b|one|two|three|four|five|six|seven|eight))/gi, '$1$2');
+    // "upper right and left 2" -> "UR2 and UL2"
+    s = s.replace(/\b(upper|lower|maxillary|mandibular)\s+right\s+(?:and|&)\s+left\s+([1-8]|[A-E]|one|two|three|four|five|six|seven|eight)\b/gi,
+      (m, a, t) => { const n = wordsToDigits(t).toUpperCase(); return archLetter(a) + 'R' + n + ' and ' + archLetter(a) + 'L' + n; });
+    // groups of teeth: "upper laterals" -> "upper 2s", "lower first molars" -> "lower 6s"
+    const GROUP = [[/(?:central incisors|centrals)/, 1], [/(?:lateral incisors|laterals)/, 2], [/(?:canines|cuspids|eye\s?teeth)/, 3],
+      [/(?:1st|first)\s+(?:premolars|bicuspids)/, 4], [/(?:2nd|second)\s+(?:premolars|bicuspids)/, 5], [/(?:1st|first)\s+molars|6\s*year\s+molars/, 6],
+      [/(?:2nd|second)\s+molars|12\s*year\s+molars/, 7], [/(?:3rd|third)\s+molars|wisdom\s+teeth/, 8]];
+    for (const [re, n] of GROUP) s = s.replace(new RegExp('\\b(upper|lower|maxillary|mandibular)\\s+(?!primary|baby)(?:' + re.source + ')\\b', 'gi'), (m, a) => (archLetter(a) === 'U' ? 'upper ' : 'lower ') + n + 's');
+    s = s.replace(/\b(upper|lower)\s+(?:primary|baby)\s+(?:canines|cuspids)\b/gi, (m, a) => archLetter(a) + 'Cs')
+      .replace(/\b(upper|lower)\s+(?:primary|baby)\s+(?:1st|first)\s+molars\b/gi, (m, a) => archLetter(a) + 'Ds')
+      .replace(/\b(upper|lower)\s+(?:primary|baby)\s+(?:2nd|second)\s+molars\b/gi, (m, a) => archLetter(a) + 'Es');
     // Palmer by tooth name: "upper right lateral incisor" -> UR2 (before number conversion)
     s = s.replace(new RegExp('\\b' + ARCH + '\\s+' + SIDE + '\\s+(' + TOOTH_NAME_ALT + ')\\b', 'gi'),
       (m, a, sd, name) => archLetter(a) + sideLetter(sd) + toothFromName(name));
@@ -249,7 +262,7 @@
       .replace(/\b(Cs|Ds|Es|C-Es)\s+(?:and|&)\s+(?:sees|cs)\b/g, '$1 and Cs');
 
     // Palmer by number/letter: "upper right 2", "U R 2", "lower left E"
-    s = s.replace(new RegExp('\\b(upper|lower|maxillary|mandibular|u|l)[\\s-]*(right|left|r|l)[\\s-]*([1-8]|[a-e]|to|too|for|fore|ate|won|sea|see|cee|ease|ee|eee|dee|bee)\\b(?![\\w/])', 'gi'),
+    s = s.replace(new RegExp('\\b(upper|lower|maxillary|mandibular|u|l)[\\s-]*(right|left|r|l)(?:\\u0027?s)?[\\s-]*(?:(?:number|#)\\s*)?([1-8]|[a-e]|to|too|for|fore|ate|won|sea|see|cee|ease|ee|eee|dee|bee)\\b(?![\\w/])', 'gi'),
       (m, a, sd, t) => archLetter(a) + sideLetter(sd) + (MISHEARD_TOOTH[t.toLowerCase()] || t.toUpperCase()));
     // "URC and E" -> "URC/E"
     s = s.replace(/\b([UL][RL])([A-E])\s*(?:and|&|n)\s*([A-E])\b(?![\w'])/g, '$1$2/$3');
