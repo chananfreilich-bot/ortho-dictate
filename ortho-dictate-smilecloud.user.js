@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ortho Dictate for Smilecloud
 // @namespace    ortho-dictate
-// @version      1.9
+// @version      1.10
 // @description  Orthodontic voice dictation with consult/adjustment/bonding/etc. templates; inserts the note into the Smilecloud notes box.
 // @include      /^https?:\/\/([^\/]*\.)?smilecloud[^\/]*\/.*$/
 // @include      /^https?:\/\/([^\/]*\.)?smile-cloud[^\/]*\/.*$/
@@ -23,7 +23,7 @@
   /* aliases: spoken names that jump to this field, def: default text,   */
   /* optional: only printed when filled                                   */
   /* ------------------------------------------------------------------ */
-  const VERSION = '1.9';
+  const VERSION = '1.10';
   const ARCH_GUARD = true; // marks aliases that must not fire when followed by right/left/and
   const NV = { key: 'nv', label: 'Next Visit', short: 'NV', aliases: ['next visit', 'next appointment', { say: 'nv', mid: true }, { say: 'n v', mid: true }] };
   const NOTES = { key: 'notes', label: 'Notes', aliases: ['notes', 'note', 'comments', 'other'], optional: true };
@@ -223,6 +223,12 @@
       .replace(/\bplus\b/gi, '+')
       .replace(/\bnumber\s+(?=\d)/gi, '#');
 
+    // misheard quadrants: "upright to" = upper right 2, "up left", "lower write", "upper lift"
+    const TT = '(?=[\\s-]*(?:[1-8]\\b|one|two|to|too|three|four|for|fore|five|six|seven|eight|ate|won|[a-e]\\b|sea|see|ease|central|lateral|canine|cuspid|first|second|third|1st|2nd|3rd|primary|baby|quadrant|side))';
+    s = s.replace(new RegExp('\\b(?:up\\s*right|upright|upper\\s+(?:write|rite|wright|righ))\\b' + TT, 'gi'), 'upper right')
+      .replace(new RegExp('\\b(?:up\\s*left|upleft|upper\\s+(?:lift|laughed|loft))\\b' + TT, 'gi'), 'upper left')
+      .replace(new RegExp('\\b(?:low\\s*right|lower\\s+(?:write|rite|wright|righ))\\b' + TT, 'gi'), 'lower right')
+      .replace(new RegExp('\\b(?:low\\s*left|lower\\s+(?:lift|laughed|loft))\\b' + TT, 'gi'), 'lower left');
     // Palmer by tooth name: "upper right lateral incisor" -> UR2 (before number conversion)
     s = s.replace(new RegExp('\\b' + ARCH + '\\s+' + SIDE + '\\s+(' + TOOTH_NAME_ALT + ')\\b', 'gi'),
       (m, a, sd, name) => archLetter(a) + sideLetter(sd) + toothFromName(name));
